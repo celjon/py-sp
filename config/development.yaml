@@ -1,0 +1,64 @@
+# Конфигурация для разработки
+database:
+  url: "postgresql://antispam:password@localhost:5432/antispam_db"
+  pool_size: 10
+
+redis:
+  url: "redis://localhost:6379/0"
+
+telegram:
+  token: "${BOT_TOKEN}"
+  admin_chat_id: "${ADMIN_CHAT_ID}"
+  admin_users: "${ADMIN_USERS}"
+
+spam_detection:
+  heuristic:
+    max_emoji: 3
+    max_caps_ratio: 0.7
+    max_links: 2
+    max_mentions: 3
+    min_message_length: 10
+    spam_threshold: 0.6
+  
+  ml:
+    model_path: "models"
+    spam_threshold: 0.6
+    min_message_length: 50
+    use_bert: true
+    bert_model_name: "RUSpam/spamNS_v1"
+  
+  ensemble:
+    spam_threshold: 0.6
+    high_confidence_threshold: 0.8
+    openai_veto: false
+    skip_ml_if_detected: true
+
+openai:
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-4o-mini"
+  max_tokens: 150
+  enabled: true
+
+external_apis:
+  cas:
+    api_url: "https://api.cas.chat/check"
+    timeout: 5
+    cache_ttl: 3600
+
+moderation:
+  auto_ban_threshold: 0.9
+  auto_restrict_threshold: 0.7
+  delete_recent_messages: true
+  recent_messages_hours: 1
+  aggressive_cleanup: false
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/antispam-bot.log"
+
+http_server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  workers: 4

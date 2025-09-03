@@ -1,0 +1,64 @@
+# Конфигурация для продакшена
+database:
+  url: "${DATABASE_URL}"
+  pool_size: 20
+
+redis:
+  url: "${REDIS_URL}"
+
+telegram:
+  token: "${BOT_TOKEN}"
+  admin_chat_id: "${ADMIN_CHAT_ID}"
+  admin_users: "${ADMIN_USERS}"
+
+spam_detection:
+  heuristic:
+    max_emoji: 2
+    max_caps_ratio: 0.6
+    max_links: 1
+    max_mentions: 2
+    min_message_length: 15
+    spam_threshold: 0.7
+  
+  ml:
+    model_path: "models"
+    spam_threshold: 0.7
+    min_message_length: 50
+    use_bert: true
+    bert_model_name: "RUSpam/spamNS_v1"
+  
+  ensemble:
+    spam_threshold: 0.7
+    high_confidence_threshold: 0.85
+    openai_veto: true
+    skip_ml_if_detected: true
+
+openai:
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-4o-mini"
+  max_tokens: 150
+  enabled: true
+
+external_apis:
+  cas:
+    api_url: "https://api.cas.chat/check"
+    timeout: 10
+    cache_ttl: 7200
+
+moderation:
+  auto_ban_threshold: 0.95
+  auto_restrict_threshold: 0.8
+  delete_recent_messages: true
+  recent_messages_hours: 2
+  aggressive_cleanup: true
+
+logging:
+  level: "WARNING"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/antispam-bot.log"
+
+http_server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  workers: 8
