@@ -146,3 +146,8 @@ temp_models/
 logs/
 .env.local
 .env.production
+
+# Test files
+test_*.py
+*_test.py
+test_*.pyc
