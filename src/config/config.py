@@ -44,15 +44,44 @@ class Config:
     logging: Dict[str, Any]
     http_server: Dict[str, Any]
 
-def load_config(env: str = "development") -> Config:
+    # Удобные свойства совместимости
+    @property
+    def bot_token(self) -> str:
+        return self.telegram.token
+
+    @property
+    def database_url(self) -> str:
+        return self.database.url
+
+    @property
+    def redis_url(self) -> str:
+        return self.redis.url
+
+    @property
+    def openai_api_key(self) -> str:
+        return self.openai.api_key
+
+    @property
+    def admin_chat_id(self) -> int:
+        return self.telegram.admin_chat_id
+
+    @property
+    def log_level(self) -> str:
+        return self.logging.get("level", "INFO")
+
+def load_config(env: str = None) -> Config:
     """Загрузить конфигурацию для указанного окружения"""
-    
+    # Определяем окружение из переменной среды или по умолчанию
+    if env is None:
+        env = os.getenv("ENVIRONMENT", "development")
+
     # Определяем путь к конфигурационному файлу
     config_dir = Path(__file__).parent.parent.parent / "config"
     config_file = config_dir / f"{env}.yaml"
     
     if not config_file.exists():
-        raise FileNotFoundError(f"Configuration file {config_file} not found")
+        print(f"⚠️ Config file {config_file} not found, using defaults")
+        return _create_default_config()
     
     # Загружаем YAML
     with open(config_file, 'r', encoding='utf-8') as f:
@@ -103,3 +132,34 @@ def _substitute_env_variables(data: Any) -> Any:
         return os.getenv(env_var, data)
     else:
         return data
+
+def _create_default_config() -> Config:
+    """Создать конфигурацию по умолчанию из переменных окружения"""
+    return Config(
+        database=DatabaseConfig(
+            url=os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/antispam_bot")
+        ),
+        redis=RedisConfig(
+            url=os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        ),
+        telegram=TelegramConfig(
+            token=os.getenv("BOT_TOKEN", ""),
+            admin_chat_id=int(os.getenv("ADMIN_CHAT_ID", "0")),
+            admin_users=[int(x.strip()) for x in os.getenv("ADMIN_USERS", "").split(",") if x.strip()]
+        ),
+        spam_detection=SpamDetectionConfig(
+            heuristic={"spam_threshold": 0.6, "max_emoji": 3},
+            ml={"spam_threshold": 0.6, "use_bert": True},
+            ensemble={"spam_threshold": 0.6}
+        ),
+        openai=OpenAIConfig(
+            api_key=os.getenv("OPENAI_API_KEY", ""),
+            model="gpt-4o-mini",
+            max_tokens=150,
+            enabled=bool(os.getenv("OPENAI_API_KEY"))
+        ),
+        external_apis={"cas": {"api_url": "https://api.cas.chat/check"}},
+        moderation={"auto_ban_threshold": 0.9},
+        logging={"level": "INFO"},
+        http_server={"enabled": False}
+    )

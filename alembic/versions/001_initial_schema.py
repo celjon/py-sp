@@ -88,6 +88,10 @@ def upgrade() -> None:
         sa.Column('source', sa.String(20), nullable=False),  # admin_report/auto_detected/etc
         sa.Column('chat_id', sa.BigInteger(), nullable=True),
         sa.Column('user_id', sa.BigInteger(), nullable=True),
+        sa.Column('language', sa.String(5), nullable=True),
+        sa.Column('confidence', sa.Float(), nullable=True),
+        sa.Column('tags', sa.ARRAY(sa.String), nullable=True),
+        sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.text('NOW()')),
         sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.text('NOW()')),
         sa.PrimaryKeyConstraint('id')
     )

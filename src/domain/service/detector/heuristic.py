@@ -3,7 +3,7 @@ from typing import Dict, Any
 from ...entity.message import Message
 from ...entity.user import User
 from ...entity.detection_result import DetectorResult
-from ...lib.utils.text_processing import TextProcessor
+from src.lib.utils.text_processing import TextProcessor
 
 class HeuristicDetector:
     """Эвристический детектор спама для быстрых проверок"""
@@ -18,7 +18,7 @@ class HeuristicDetector:
         self.max_links = self.config.get("max_links", 2)
         self.max_mentions = self.config.get("max_mentions", 3)
         self.min_message_length = self.config.get("min_message_length", 10)
-        self.spam_threshold = self.config.get("spam_threshold", 0.6)
+        self.spam_threshold = self.config.get("spam_threshold", 0.4)
     
     async def check_message(self, message: Message, user: User) -> DetectorResult:
         """Проверить сообщение эвристическими методами"""
@@ -74,11 +74,13 @@ class HeuristicDetector:
         spam_patterns = self.text_processor.contains_spam_patterns(text)
         pattern_score = 0.0
         for category, info in spam_patterns.items():
-            if info['count'] > 0:
-                pattern_score += info['ratio'] * 0.3
+            count = info.get('count', 0)
+            ratio = info.get('ratio', 0.0)
+            if count > 0:
+                pattern_score += ratio * 0.3
         
         if pattern_score > 0:
-            violations.append(f"spam patterns detected ({pattern_score:.2f})")
+            violations.append(f"spam patterns detected (score: {pattern_score:.2f})")
             confidence += pattern_score
         
         # 9. Проверка восклицательных знаков

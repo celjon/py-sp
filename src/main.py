@@ -21,7 +21,6 @@ from src.adapter.repository.user_repository import UserRepository
 from src.adapter.gateway.telegram_gateway import TelegramGateway
 from src.adapter.gateway.openai_gateway import OpenAIGateway
 from src.adapter.gateway.cas_gateway import CASGateway
-from src.adapter.gateway.spamwatch_gateway import SpamWatchGateway
 from src.lib.clients.http_client import HttpClient
 from src.domain.service.detector.ensemble import EnsembleDetector
 from src.domain.usecase.spam_detection.check_message import CheckMessageUseCase
@@ -52,7 +51,7 @@ async def setup_dependencies(config):
     user_repo = UserRepository(postgres_client)
     
     # Создаем spam_samples_repository
-    from adapter.repository.spam_samples_repository import SpamSamplesRepository
+    from src.adapter.repository.spam_samples_repository import SpamSamplesRepository
     spam_samples_repo = SpamSamplesRepository(postgres_client)
     
     # Создаем шлюзы (gateways)
@@ -81,24 +80,10 @@ async def setup_dependencies(config):
         }
     )
     
-    # SpamWatch gateway (если настроен)
-    spamwatch_gateway = None
-    if config.spamwatch_api_key:
-        spamwatch_gateway = SpamWatchGateway(
-            api_token=config.spamwatch_api_key,
-            http_client=http_client,
-            cache=redis_cache,
-            config={
-                "timeout": 5,
-                "cache_ttl": 3600
-            }
-        )
     
     # Создаем детектор спама
     spam_detector = EnsembleDetector()
     spam_detector.add_cas_detector(cas_gateway)
-    if spamwatch_gateway:
-        spam_detector.add_spamwatch_detector(spamwatch_gateway)
     if openai_gateway:
         spam_detector.add_openai_detector(openai_gateway)
     
@@ -133,7 +118,6 @@ async def setup_dependencies(config):
         "telegram_gateway": telegram_gateway,
         "openai_gateway": openai_gateway,
         "cas_gateway": cas_gateway,
-        "spamwatch_gateway": spamwatch_gateway,
         "spam_detector": spam_detector,
         "check_message_usecase": check_message_usecase,
         "ban_user_usecase": ban_user_usecase,

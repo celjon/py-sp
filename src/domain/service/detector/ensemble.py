@@ -67,7 +67,13 @@ class EnsembleDetector:
         max_confidence = 0.0
         
         # 1. Быстрые эвристические проверки
-        heuristic_result = await self.heuristic_detector.check_message(message, user_context)
+        # Преобразуем контекст в User для согласованности интерфейсов
+        context_user = User(
+            telegram_id=message.user_id,
+            message_count=(user_context or {}).get("message_count", 0),
+            spam_score=(user_context or {}).get("spam_score", 0.0)
+        )
+        heuristic_result = await self.heuristic_detector.check_message(message, context_user)
         results.append(heuristic_result)
         
         if heuristic_result.is_spam:

@@ -103,7 +103,8 @@ class DetectionResult:
         # Низкая уверенность - предупреждение
         else:
             self.should_warn = True
-            self.should_delete = True
+            # Для предупреждений удаление не обязательно
+            self.should_delete = self.overall_confidence > 0.5
     
     def to_summary(self) -> str:
         """Возвращает краткое описание результата"""

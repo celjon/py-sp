@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from sklearn.pipeline import Pipeline
-from ...lib.utils.text_processing import TextProcessor
+from src.lib.utils.text_processing import TextProcessor
 
 # Попытка импорта BERT модели (опционально)
 try:
@@ -75,6 +75,7 @@ class MLClassifier:
         try:
             if not BERT_AVAILABLE:
                 print("⚠️ BERT dependencies not available")
+                self.use_bert = False
                 return
                 
             print(f"🤖 Loading BERT model: {self.bert_model_name}")
@@ -83,14 +84,18 @@ class MLClassifier:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             print(f"📱 Using device: {self.device}")
             
-            # Загружаем токенизатор и модель
-            self.bert_tokenizer = AutoTokenizer.from_pretrained(self.bert_model_name)
-            self.bert_model = AutoModelForSequenceClassification.from_pretrained(
-                self.bert_model_name, 
-                num_labels=1
-            ).to(self.device).eval()
-            
-            print(f"✅ BERT model loaded successfully")
+            # Загружаем RUSpam модель
+            try:
+                self.bert_tokenizer = AutoTokenizer.from_pretrained(self.bert_model_name)
+                self.bert_model = AutoModelForSequenceClassification.from_pretrained(
+                    self.bert_model_name, 
+                    num_labels=2
+                ).to(self.device).eval()
+                print(f"✅ RUSpam модель загружена успешно")
+            except Exception as e:
+                print(f"❌ Не удалось загрузить RUSpam: {e}")
+                print("💡 Попробуйте: pip install torch transformers")
+                self.use_bert = False
             
         except Exception as e:
             print(f"❌ Error loading BERT model: {e}")
@@ -169,10 +174,12 @@ class MLClassifier:
             # Предсказание
             with torch.no_grad():
                 outputs = self.bert_model(input_ids, attention_mask=attention_mask).logits
-                pred = torch.sigmoid(outputs).cpu().numpy()[0][0]
+                probs = torch.softmax(outputs, dim=-1).cpu().numpy()[0]
+                # Класс 1 = спам (для большинства двоичных моделей)
+                spam_prob = float(probs[1]) if len(probs) > 1 else float(probs[0])
             
-            is_spam = bool(pred >= 0.5)
-            confidence = float(pred)
+            is_spam = bool(spam_prob >= 0.5)
+            confidence = spam_prob
             
             details = self._generate_details(text, is_spam, confidence)
             details += " (BERT model)"
