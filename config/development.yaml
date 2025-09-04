@@ -12,6 +12,7 @@ telegram:
   admin_users: "${ADMIN_USERS}"
 
 spam_detection:
+  # Эвристические проверки (самые быстрые)
   heuristic:
     max_emoji: 3
     max_caps_ratio: 0.7
@@ -20,18 +21,26 @@ spam_detection:
     min_message_length: 10
     spam_threshold: 0.6
   
+  # ML классификатор
   ml:
+    enabled: true
     model_path: "models"
     spam_threshold: 0.6
     min_message_length: 50
     use_bert: true
     bert_model_name: "RUSpam/spamNS_v1"
   
+  # RUSpam настройки
+  use_ruspam: true
+  ruspam_min_length: 10
+  russian_threshold: 0.3  # Минимальная доля кириллицы для определения русского текста
+  
+  # Ансамблевый детектор
   ensemble:
     spam_threshold: 0.6
     high_confidence_threshold: 0.8
-    openai_veto: false
-    skip_ml_if_detected: true
+    openai_veto: false  # В dev режиме OpenAI не отменяет другие детекторы
+    skip_ml_if_detected: true  # Пропускать ML если эвристика/CAS уже нашли спам
 
 openai:
   api_key: "${OPENAI_API_KEY}"
@@ -43,22 +52,58 @@ external_apis:
   cas:
     api_url: "https://api.cas.chat/check"
     timeout: 5
-    cache_ttl: 3600
+    cache_ttl: 3600  # 1 час кэширования для разработки
 
 moderation:
-  auto_ban_threshold: 0.9
-  auto_restrict_threshold: 0.7
+  auto_ban_threshold: 0.9      # Автобан при уверенности >= 90%
+  auto_restrict_threshold: 0.7  # Ограничение при уверенности >= 70%
   delete_recent_messages: true
-  recent_messages_hours: 1
-  aggressive_cleanup: false
+  recent_messages_hours: 1      # Удалять сообщения за последний час
+  aggressive_cleanup: false     # В dev режиме не агрессивная очистка
 
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/antispam-bot.log"
+  file: "logs/antispam-bot-dev.log"
+  structured: false  # Обычные логи для разработки
 
 http_server:
   enabled: true
   host: "0.0.0.0"
   port: 8080
-  workers: 4
+  workers: 2  # Меньше воркеров для разработки
+  cors_enabled: true
+  cors_origins: ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+# Дополнительные настройки для разработки
+dev_settings:
+  reload_config: true          # Перезагружать конфиг при изменениях
+  debug_mode: true            # Подробная отладочная информация
+  mock_external_apis: false   # Не мокать API в dev (используем реальные)
+  test_mode: false           # Не тестовый режим
+  save_detection_details: true # Сохранять детали детекции для отладки
+
+# Метрики и мониторинг
+metrics:
+  enabled: true
+  prometheus_port: 9090
+  collect_detailed: true  # Детальные метрики для разработки
+
+# Параметры производительности (relaxed для dev)
+performance:
+  max_concurrent_checks: 10     # Ограничение одновременных проверок
+  detection_timeout: 5.0        # Таймаут детекции в секундах
+  cache_detection_results: 300  # Кэшировать результаты на 5 минут
+  rate_limit_per_user: 30       # Запросов в минуту на пользователя (больше для dev)
+
+# Интеграция с внешними сервисами
+integrations:
+  telegram_webhook: false  # Polling для разработки
+  webhooks:
+    enabled: false
+    verify_ssl: false    # Для локальных тестов
+  
+  # Дополнительные API для тестирования
+  experimental_apis:
+    enabled: true
+    test_unknown_detectors: true
