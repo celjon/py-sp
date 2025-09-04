@@ -58,9 +58,11 @@ class RUSpamClassifier:
 
             # Загружаем модель
             def _load_model():
+                # По тесту: регрессия (1 логит) + ignore_mismatched_sizes
                 return AutoModelForSequenceClassification.from_pretrained(
                     self.model_name,
-                    num_labels=1
+                    num_labels=1,
+                    ignore_mismatched_sizes=True
                 ).to(self.device).eval()
 
             self.model = await loop.run_in_executor(None, _load_model)
@@ -102,11 +104,14 @@ class RUSpamClassifier:
                     details="Text too short after cleaning"
                 )
 
+            # Динамический max_length как в тесте: 512 для DeBERTa/Roberta/XLM, иначе 128
+            max_length = 512 if any(arch in self.model_name.lower() for arch in ['deberta', 'roberta', 'xlm']) else 128
+
             encoding = self.tokenizer(
                 cleaned_message,
                 padding='max_length',
                 truncation=True,
-                max_length=128,
+                max_length=max_length,
                 return_tensors='pt'
             )
 

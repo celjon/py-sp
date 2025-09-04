@@ -87,11 +87,13 @@ class MLClassifier:
             # Загружаем RUSpam модель
             try:
                 self.bert_tokenizer = AutoTokenizer.from_pretrained(self.bert_model_name)
+                # В соответствии с тестом RUSpam/spamNS_v1 — регрессионная модель с одним выходом
                 self.bert_model = AutoModelForSequenceClassification.from_pretrained(
-                    self.bert_model_name, 
-                    num_labels=2
+                    self.bert_model_name,
+                    num_labels=1,
+                    ignore_mismatched_sizes=True
                 ).to(self.device).eval()
-                print(f"✅ RUSpam модель загружена успешно")
+                print(f"✅ RUSpam модель загружена успешно (регрессия, 1 выход)")
             except Exception as e:
                 print(f"❌ Не удалось загрузить RUSpam: {e}")
                 print("💡 Попробуйте: pip install torch transformers")
@@ -160,26 +162,27 @@ class MLClassifier:
                 )
             
             # Токенизация
+            # Для моделей семейства DeBERTa/Roberta можно увеличить max_length до 512,
+            # но у RUSpam/spamNS_v1 достаточно 128 для снижения латентности
             encoding = self.bert_tokenizer(
-                cleaned_text, 
-                padding='max_length', 
-                truncation=True, 
-                max_length=128, 
+                cleaned_text,
+                padding='max_length',
+                truncation=True,
+                max_length=128,
                 return_tensors='pt'
             )
             
             input_ids = encoding['input_ids'].to(self.device)
             attention_mask = encoding['attention_mask'].to(self.device)
             
-            # Предсказание
+            # Предсказание (в соответствии с тестом: регрессия + sigmoid)
             with torch.no_grad():
                 outputs = self.bert_model(input_ids, attention_mask=attention_mask).logits
-                probs = torch.softmax(outputs, dim=-1).cpu().numpy()[0]
-                # Класс 1 = спам (для большинства двоичных моделей)
-                spam_prob = float(probs[1]) if len(probs) > 1 else float(probs[0])
-            
+                spam_prob_tensor = torch.sigmoid(outputs)
+                spam_prob = float(spam_prob_tensor.cpu().numpy()[0][0])
+
             is_spam = bool(spam_prob >= 0.5)
-            confidence = spam_prob
+            confidence = float(spam_prob)
             
             details = self._generate_details(text, is_spam, confidence)
             details += " (BERT model)"
