@@ -97,12 +97,40 @@ def load_config(env: str = None) -> Config:
     telegram_data = config_data["telegram"]
     # Обрабатываем admin_users - может быть строкой из env или списком
     admin_users = telegram_data["admin_users"]
+    # Исправление: если admin_users не подставился из env, делаем список пустым
     if isinstance(admin_users, str):
-        admin_users = [int(x.strip()) for x in admin_users.split(",") if x.strip()]
+        if admin_users.startswith("${") and admin_users.endswith("}"):
+            admin_users = []
+        elif not admin_users.strip():
+            admin_users = []
+        else:
+            try:
+                if "," in admin_users:
+                    admin_users = [int(x.strip()) for x in admin_users.split(",") if x.strip()]
+                else:
+                    admin_users = [int(admin_users.strip())] if admin_users.strip() else []
+            except ValueError as e:
+                print(f"❌ Ошибка парсинга ADMIN_USERS: {admin_users} ({e})")
+                admin_users = []
     
+    admin_chat_id = telegram_data["admin_chat_id"]
+    if isinstance(admin_chat_id, str):
+        if admin_chat_id.startswith("${") and admin_chat_id.endswith("}"):
+            admin_chat_id = 0
+        elif not admin_chat_id.strip():
+            admin_chat_id = 0
+        else:
+            try:
+                admin_chat_id = int(admin_chat_id)
+            except ValueError as e:
+                print(f"❌ Ошибка парсинга ADMIN_CHAT_ID: {admin_chat_id} ({e})")
+                admin_chat_id = 0
+    else:
+        admin_chat_id = int(admin_chat_id)
+
     telegram_config = TelegramConfig(
         token=telegram_data["token"],
-        admin_chat_id=int(telegram_data["admin_chat_id"]),
+        admin_chat_id=admin_chat_id,
         admin_users=admin_users
     )
     
@@ -120,6 +148,18 @@ def load_config(env: str = None) -> Config:
         logging=config_data["logging"],
         http_server=config_data["http_server"]
     )
+
+def _parse_admin_users(admin_users_str: str) -> List[int]:
+    """Парсит строку с ID администраторов"""
+    if not admin_users_str or not admin_users_str.strip():
+        return []
+    
+    # Если строка содержит запятые, разбиваем по запятым
+    if "," in admin_users_str:
+        return [int(x.strip()) for x in admin_users_str.split(",") if x.strip()]
+    else:
+        # Если один ID, создаем список из одного элемента
+        return [int(admin_users_str.strip())] if admin_users_str.strip() else []
 
 def _substitute_env_variables(data: Any) -> Any:
     """Рекурсивно заменяет ${VAR} на значения переменных окружения"""
@@ -145,7 +185,7 @@ def _create_default_config() -> Config:
         telegram=TelegramConfig(
             token=os.getenv("BOT_TOKEN", ""),
             admin_chat_id=int(os.getenv("ADMIN_CHAT_ID", "0")),
-            admin_users=[int(x.strip()) for x in os.getenv("ADMIN_USERS", "").split(",") if x.strip()]
+            admin_users=_parse_admin_users(os.getenv("ADMIN_USERS", ""))
         ),
         spam_detection=SpamDetectionConfig(
             heuristic={"spam_threshold": 0.6, "max_emoji": 3},

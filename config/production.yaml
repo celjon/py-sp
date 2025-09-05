@@ -9,7 +9,7 @@ redis:
 telegram:
   token: "${BOT_TOKEN}"
   admin_chat_id: "${ADMIN_CHAT_ID}"
-  admin_users: "${ADMIN_USERS}"
+  admin_users: ${ADMIN_USERS}
 
 spam_detection:
   # Эвристические проверки (более строгие для продакшена)
@@ -20,6 +20,9 @@ spam_detection:
     max_mentions: 2        # Строже для продакшена
     min_message_length: 15 # Длиннее для продакшена
     spam_threshold: 0.7    # Выше порог для продакшена
+    use_ruspam: true
+    ruspam_min_length: 15
+    russian_threshold: 0.4
   
   # ML классификатор
   ml:
@@ -29,11 +32,6 @@ spam_detection:
     min_message_length: 50
     use_bert: true
     bert_model_name: "RUSpam/spamNS_v1"
-  
-  # RUSpam настройки
-  use_ruspam: true
-  ruspam_min_length: 15    # Длиннее для продакшена
-  russian_threshold: 0.4   # Чуть выше для более точного определения
   
   # Ансамблевый детектор
   ensemble:

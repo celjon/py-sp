@@ -1,6 +1,6 @@
 # Конфигурация для разработки
 database:
-  url: "postgresql://antispam:password@localhost:5432/antispam_db"
+  url: "postgresql://antispam_user:StrongPassword123!@localhost:5432/antispam_bot"
   pool_size: 10
 
 redis:
@@ -9,7 +9,7 @@ redis:
 telegram:
   token: "${BOT_TOKEN}"
   admin_chat_id: "${ADMIN_CHAT_ID}"
-  admin_users: "${ADMIN_USERS}"
+  admin_users: ${ADMIN_USERS}
 
 spam_detection:
   # Эвристические проверки (самые быстрые)
@@ -20,6 +20,9 @@ spam_detection:
     max_mentions: 3
     min_message_length: 10
     spam_threshold: 0.6
+    use_ruspam: true
+    ruspam_min_length: 10
+    russian_threshold: 0.3
   
   # ML классификатор
   ml:
@@ -29,11 +32,6 @@ spam_detection:
     min_message_length: 50
     use_bert: true
     bert_model_name: "RUSpam/spamNS_v1"
-  
-  # RUSpam настройки
-  use_ruspam: true
-  ruspam_min_length: 10
-  russian_threshold: 0.3  # Минимальная доля кириллицы для определения русского текста
   
   # Ансамблевый детектор
   ensemble:

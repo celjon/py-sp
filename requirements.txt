@@ -9,7 +9,7 @@ asyncpg>=0.29.0
 alembic>=1.13.0
 
 # Redis
-aioredis>=2.0.0
+redis[asyncio]>=5.0.0
 
 # HTTP клиент
 aiohttp>=3.9.0
@@ -55,4 +55,5 @@ mypy>=1.7.0
 # Планировщик и время
 APScheduler>=3.10.0
 pytz>=2023.3
+
 

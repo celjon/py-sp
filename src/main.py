@@ -205,10 +205,41 @@ async def run_telegram_bot(config, dependencies):
 
 
 async def run_http_server(config, dependencies):
-    """Запуск HTTP сервера (будет реализован в следующем этапе)"""
-    print("🌐 HTTP сервер будет доступен в следующем этапе разработки")
-    # TODO: Реализация в Этапе 2
-    pass
+    """Запуск HTTP сервера"""
+    print("🌐 Запуск HTTP сервера...")
+    
+    try:
+        import uvicorn
+        from src.delivery.http.app import create_app
+        
+        # Создаем FastAPI приложение с зависимостями
+        app = create_app(dependencies)
+        
+        # Настройки сервера из конфигурации
+        server_config = uvicorn.Config(
+            app=app,
+            host=config.http_server.get("host", "0.0.0.0"),
+            port=config.http_server.get("port", 8080),
+            workers=1,  # Для async приложения используем 1 воркер
+            loop="asyncio",
+            log_level=config.log_level.lower(),
+            access_log=True
+        )
+        
+        print(f"🌐 HTTP сервер запускается на {server_config.host}:{server_config.port}")
+        print(f"📚 API документация будет доступна на http://{server_config.host}:{server_config.port}/docs")
+        
+        # Создаем и запускаем сервер
+        server = uvicorn.Server(server_config)
+        await server.serve()
+        
+    except ImportError:
+        print("❌ uvicorn не установлен. Установите: pip install uvicorn")
+        print("⚠️ HTTP сервер не может быть запущен")
+        return
+    except Exception as e:
+        print(f"❌ Ошибка запуска HTTP сервера: {e}")
+        raise
 
 
 async def main():
@@ -242,6 +273,8 @@ async def main():
             await run_http_server(config, dependencies)
         elif run_mode == "both":
             # Запуск обоих сервисов параллельно
+            print("🔄 Запуск в dual режиме (Telegram + HTTP)...")
+            
             telegram_task = asyncio.create_task(run_telegram_bot(config, dependencies))
             http_task = asyncio.create_task(run_http_server(config, dependencies))
             
@@ -305,6 +338,15 @@ def check_environment():
         print(f"❌ Отсутствует зависимость: {e}")
         print("💡 Установите зависимости: pip install -r requirements.txt")
         sys.exit(1)
+    
+    # Проверяем HTTP зависимости
+    try:
+        import fastapi
+        import uvicorn
+        print("✅ HTTP зависимости найдены")
+    except ImportError as e:
+        print(f"⚠️ HTTP зависимости не найдены: {e}")
+        print("💡 Для HTTP API установите: pip install fastapi uvicorn")
     
     # Проверяем опциональные зависимости
     optional_deps = {

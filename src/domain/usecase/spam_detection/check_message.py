@@ -59,7 +59,7 @@ class CheckMessageUseCase:
         user_context = {
             "message_count": user.message_count,
             "spam_score": user.spam_score,
-            "is_new_user": user.is_new_user() if hasattr(user, "is_new_user") else user.message_count == 0,
+            "is_new_user": user.is_new_user if hasattr(user, "is_new_user") else user.message_count == 0,
             "chat_id": getattr(message, "chat_id", None),
         }
 

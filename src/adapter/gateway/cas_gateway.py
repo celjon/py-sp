@@ -23,28 +23,25 @@ class CASGateway:
             bool: True если пользователь забанен в CAS, False если нет
         """
         cache_key = f"cas_check:{user_id}"
-        
-        # Проверяем кэш
+          # Проверяем кэш
         cached_result = await self.cache.get(cache_key)
         if cached_result is not None:
             return cached_result == "banned"
 
         try:
             # Делаем запрос к CAS API согласно документации
-            url = f"{self.api_url}/check?user_id={user_id}"
+            url = f"{self.api_url}?user_id={user_id}"
             
             response_data = await self.http_client.get(
                 url, 
                 headers={"User-Agent": "AntiSpamBot/1.0"}
             )
             
-            # Согласно документации CAS API:
-            # - ok: True если запрос успешен
-            # - result: содержит результат проверки
-            if response_data and response_data.get("ok", False):
-                # Пользователь забанен если result содержит информацию о бане
-                result = response_data.get("result", {})
-                is_banned = result.get("banned", False)
+            # Согласно реальному поведению CAS API:
+            # - ok: True означает пользователь ЗАБАНЕН (найден в базе CAS)
+            # - ok: False означает пользователь НЕ ЗАБАНЕН (не найден в базе, "Record not found")
+            if response_data:
+                is_banned = response_data.get("ok", False)
                 
                 # Кэшируем результат
                 await self.cache.set(
@@ -55,11 +52,8 @@ class CASGateway:
                 
                 return is_banned
             else:
-                # Ошибка API или пользователь не найден
-                if response_data:
-                    error_desc = response_data.get("description", "Unknown error")
-                    error_code = response_data.get("error_code", "Unknown")
-                    print(f"CAS API error for user {user_id}: {error_code} - {error_desc}")
+                # Нет ответа от API
+                print(f"CAS API no response for user {user_id}")
                 return False
             
         except asyncio.TimeoutError:
@@ -93,4 +87,5 @@ class CASGateway:
         except Exception as e:
             print(f"CAS CSV export error: {e}")
             return None
+
 
