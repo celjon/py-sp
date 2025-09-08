@@ -63,3 +63,4 @@ class TelegramGateway:
             print(f"Failed to send message to chat {chat_id}: {e}")
             return False
 
+

@@ -87,3 +87,4 @@ class UserRepository:
             is_admin=row['is_admin']
         )
 
+

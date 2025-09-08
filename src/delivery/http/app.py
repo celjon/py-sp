@@ -8,22 +8,101 @@ from typing import Dict, Any, Optional
 import asyncio
 
 from ...config.config import load_config
-from .routers import spam_check, admin, stats
+from .routes import public_api, auth, admin, stats
 from .middlewares.rate_limit import RateLimitMiddleware
-from .middlewares.auth import get_current_user
+from .middlewares.api_auth import ApiAuthMiddleware
 
 
 def create_app(dependencies: Dict[str, Any] = None) -> FastAPI:
-    """Создание FastAPI приложения"""
+    """Создание FastAPI приложения с публичным API"""
     
     config = load_config()
     
     app = FastAPI(
         title="AntiSpam Bot API",
-        description="Многослойная система детекции спама для Telegram",
+        description="""
+        🚫 **Многослойная система детекции спама для Telegram**
+        
+        ## 🎯 Возможности
+        
+        ### Публичный API
+        - `/api/v1/detect` - Детекция спама для одного сообщения
+        - `/api/v1/detect/batch` - Batch детекция до 100 сообщений  
+        - `/api/v1/stats` - Статистика использования вашего API ключа
+        - `/api/v1/detectors` - Информация о доступных детекторах
+        
+        ### Управление API ключами  
+        - `/api/v1/auth/keys` - Создание и управление API ключами
+        - `/api/v1/auth/stats` - Глобальная статистика использования
+        
+        ### Админ панель
+        - `/api/v1/admin/` - Управление образцами спама
+        - `/api/v1/admin/status` - Статус системы
+        
+        ## 🔐 Аутентификация
+        
+        Для доступа к API требуется API ключ. Передавайте его в заголовке:
+        ```
+        Authorization: Bearer YOUR_API_KEY
+        ```
+        
+        ## 📊 Rate Limiting
+        
+        - **Free план**: 10 запросов/мин, 1K запросов/день
+        - **Basic план**: 60 запросов/мин, 10K запросов/день  
+        - **Pro план**: 300 запросов/мин, 50K запросов/день
+        - **Enterprise план**: Без лимитов
+        
+        ## 🔍 Детекторы спама
+        
+        1. **Эвристики** (1-5ms) - быстрые проверки emoji, caps, ссылок
+        2. **CAS** (10-50ms) - база известных спамеров Combot
+        3. **RUSpam** (100-500ms) - BERT модель для русского языка
+        4. **ML Classifier** (100-500ms) - sklearn классификатор
+        5. **OpenAI** (1-3s) - анализ сложных случаев
+        
+        ## 📈 Пример использования
+        
+        ```python
+        import requests
+        
+        headers = {"Authorization": "Bearer YOUR_API_KEY"}
+        data = {
+            "text": "🔥🔥🔥 Заработок! Детали в ЛС!",
+            "context": {"is_new_user": True}
+        }
+        
+        response = requests.post(
+            "https://api.antispam.example.com/api/v1/detect",
+            json=data,
+            headers=headers
+        )
+        
+        result = response.json()
+        print(f"Спам: {result['is_spam']}, уверенность: {result['confidence']}")
+        ```
+        """,
         version="2.0.0",
         docs_url="/docs",
-        redoc_url="/redoc"
+        redoc_url="/redoc",
+        openapi_tags=[
+            {
+                "name": "spam-detection",
+                "description": "🔍 Детекция спама - основной функционал API"
+            },
+            {
+                "name": "auth",
+                "description": "🔐 Управление API ключами и аутентификация"
+            },
+            {
+                "name": "statistics", 
+                "description": "📊 Статистика использования и производительности"
+            },
+            {
+                "name": "admin",
+                "description": "🛡️ Административные функции (требует админских прав)"
+            }
+        ]
     )
     
     # Сохраняем зависимости в app state
@@ -40,17 +119,56 @@ def create_app(dependencies: Dict[str, Any] = None) -> FastAPI:
             allow_methods=["GET", "POST", "PUT", "DELETE"],
             allow_headers=["*"],
         )
+        print(f"🌐 CORS enabled for origins: {allowed_origins}")
+    
+    # API Authentication middleware для публичных endpoints
+    api_key_repo = dependencies.get("api_key_repository") if dependencies else None
+    usage_repo = dependencies.get("usage_repository") if dependencies else None
+    
+    if api_key_repo and usage_repo:
+        app.add_middleware(
+            ApiAuthMiddleware,
+            api_key_repo=api_key_repo,
+            usage_repo=usage_repo,
+            protected_paths=[
+                "/api/v1/detect",
+                "/api/v1/detect/batch", 
+                "/api/v1/stats",
+                "/api/v1/detectors"
+            ]
+        )
+        print("🔐 API Authentication middleware добавлен")
     
     # Rate limiting middleware
     app.add_middleware(RateLimitMiddleware)
+    print("🚦 Rate limiting middleware добавлен")
     
     # Включаем роутеры
-    app.include_router(spam_check.router, prefix="/api/v1", tags=["spam-detection"])
-    app.include_router(stats.router, prefix="/api/v1", tags=["statistics"])
-    app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+    app.include_router(
+        public_api.router, 
+        prefix="/api/v1", 
+        tags=["spam-detection"]
+    )
+    app.include_router(
+        auth.router, 
+        prefix="/api/v1/auth", 
+        tags=["auth"]
+    )
+    app.include_router(
+        stats.router, 
+        prefix="/api/v1", 
+        tags=["statistics"]
+    )
+    app.include_router(
+        admin.router, 
+        prefix="/api/v1/admin", 
+        tags=["admin"]
+    )
+    
+    print("✅ Все API routes подключены")
     
     # Health check endpoint
-    @app.get("/health")
+    @app.get("/health", tags=["monitoring"])
     async def health_check():
         """Проверка состояния API"""
         try:
@@ -63,8 +181,13 @@ def create_app(dependencies: Dict[str, Any] = None) -> FastAPI:
                     "status": "healthy",
                     "timestamp": time.time(),
                     "version": "2.0.0",
+                    "api": {
+                        "public_endpoints": 4,
+                        "admin_endpoints": 8,
+                        "auth_endpoints": 6
+                    },
                     "detectors": health.get("detectors", {}),
-                    "api": "operational"
+                    "services": "operational"
                 }
             else:
                 return {
@@ -84,38 +207,52 @@ def create_app(dependencies: Dict[str, Any] = None) -> FastAPI:
             )
     
     # Metrics endpoint (Prometheus format)
-    @app.get("/metrics")
+    @app.get("/metrics", tags=["monitoring"])
     async def metrics():
         """Метрики в формате Prometheus"""
         try:
             dependencies = app.state.dependencies
             message_repo = dependencies.get("message_repository")
+            usage_repo = dependencies.get("usage_repository")
             
-            if not message_repo:
-                raise HTTPException(status_code=503, detail="Database not available")
+            if not usage_repo:
+                raise HTTPException(status_code=503, detail="Metrics service not available")
             
-            # Получаем статистику за последние 24 часа
-            global_stats = await message_repo.get_global_stats(hours=24)
+            # Получаем глобальную статистику API
+            api_stats = await usage_repo.get_global_usage_stats(hours=24)
             
-            metrics_text = f"""# HELP spam_messages_total Total number of spam messages detected
-# TYPE spam_messages_total counter
-spam_messages_total {global_stats['spam_messages']}
+            # Получаем статистику Telegram (если доступна)
+            telegram_stats = {}
+            if message_repo:
+                telegram_stats = await message_repo.get_global_stats(hours=24)
+            
+            metrics_text = f"""# HELP api_requests_total Total number of API requests
+# TYPE api_requests_total counter
+api_requests_total {api_stats.get('total_requests', 0)}
 
-# HELP clean_messages_total Total number of clean messages processed  
-# TYPE clean_messages_total counter
-clean_messages_total {global_stats['clean_messages']}
+# HELP api_requests_successful Successful API requests
+# TYPE api_requests_successful counter  
+api_requests_successful {api_stats.get('successful_requests', 0)}
 
-# HELP spam_detection_rate Spam detection rate (0-1)
-# TYPE spam_detection_rate gauge
-spam_detection_rate {global_stats['spam_percentage'] / 100}
+# HELP api_spam_detected_total Total spam detected via API
+# TYPE api_spam_detected_total counter
+api_spam_detected_total {api_stats.get('spam_detected', 0)}
 
-# HELP active_chats_total Number of active chats
-# TYPE active_chats_total gauge
-active_chats_total {global_stats['active_chats']}
+# HELP api_active_keys Number of active API keys
+# TYPE api_active_keys gauge
+api_active_keys {api_stats.get('active_api_keys', 0)}
 
-# HELP active_users_total Number of active users
-# TYPE active_users_total gauge
-active_users_total {global_stats['active_users']}
+# HELP api_avg_processing_time_ms Average processing time in milliseconds
+# TYPE api_avg_processing_time_ms gauge
+api_avg_processing_time_ms {api_stats.get('avg_processing_time_ms', 0)}
+
+# HELP telegram_spam_messages_total Total spam messages from Telegram
+# TYPE telegram_spam_messages_total counter
+telegram_spam_messages_total {telegram_stats.get('spam_messages', 0)}
+
+# HELP telegram_clean_messages_total Total clean messages from Telegram  
+# TYPE telegram_clean_messages_total counter
+telegram_clean_messages_total {telegram_stats.get('clean_messages', 0)}
 """
             
             return JSONResponse(
@@ -126,23 +263,96 @@ active_users_total {global_stats['active_users']}
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Metrics error: {str(e)}")
     
-    # Root endpoint
-    @app.get("/")
+    # Root endpoint with API info
+    @app.get("/", tags=["info"])
     async def root():
-        """Корневой endpoint"""
+        """Корневой endpoint с информацией об API"""
         return {
             "name": "AntiSpam Bot API",
             "version": "2.0.0",
-            "description": "Многослойная система детекции спама",
+            "description": "Многослойная система детекции спама с публичным API",
             "docs": "/docs",
             "health": "/health",
             "metrics": "/metrics",
-            "endpoints": {
-                "check_spam": "POST /api/v1/check",
-                "statistics": "GET /api/v1/stats",
-                "admin": "GET /api/v1/admin/"
+            "api": {
+                "public": {
+                    "base_url": "/api/v1",
+                    "endpoints": {
+                        "detect_spam": "POST /api/v1/detect",
+                        "batch_detect": "POST /api/v1/detect/batch",
+                        "usage_stats": "GET /api/v1/stats",
+                        "detectors_info": "GET /api/v1/detectors"
+                    }
+                },
+                "auth": {
+                    "base_url": "/api/v1/auth",
+                    "endpoints": {
+                        "create_key": "POST /api/v1/auth/keys",
+                        "list_keys": "GET /api/v1/auth/keys", 
+                        "global_stats": "GET /api/v1/auth/stats"
+                    }
+                },
+                "admin": {
+                    "base_url": "/api/v1/admin",
+                    "authentication": "Basic Auth required"
+                }
+            },
+            "features": [
+                "Многослойная детекция спама",
+                "Поддержка русского и английского языков", 
+                "Rate limiting по API ключам",
+                "Real-time статистика использования",
+                "Batch обработка до 100 сообщений",
+                "Webhook уведомления",
+                "IP whitelist для безопасности"
+            ],
+            "contact": {
+                "docs": "/docs",
+                "support": "admin@antispam.example.com"
             }
         }
+    
+    # OpenAPI customization
+    @app.get("/openapi.json", include_in_schema=False)
+    async def custom_openapi():
+        """Кастомизированная OpenAPI схема"""
+        from fastapi.openapi.utils import get_openapi
+        
+        if app.openapi_schema:
+            return app.openapi_schema
+        
+        openapi_schema = get_openapi(
+            title="AntiSpam Bot API",
+            version="2.0.0",
+            description=app.description,
+            routes=app.routes,
+        )
+        
+        # Добавляем примеры аутентификации
+        openapi_schema["components"]["securitySchemes"] = {
+            "ApiKeyAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "API Key"
+            },
+            "BasicAuth": {
+                "type": "http", 
+                "scheme": "basic"
+            }
+        }
+        
+        # Добавляем security для всех endpoints
+        for path, methods in openapi_schema["paths"].items():
+            for method, details in methods.items():
+                if path.startswith("/api/v1/detect") or path.startswith("/api/v1/stats"):
+                    details["security"] = [{"ApiKeyAuth": []}]
+                elif path.startswith("/api/v1/auth"):
+                    details["security"] = [{"BasicAuth": []}]
+                elif path.startswith("/api/v1/admin"):
+                    details["security"] = [{"BasicAuth": []}]
+        
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
     
     # Error handlers
     @app.exception_handler(HTTPException)
@@ -152,20 +362,37 @@ active_users_total {global_stats['active_users']}
             content={
                 "error": exc.detail,
                 "timestamp": time.time(),
-                "path": str(request.url)
+                "path": str(request.url.path),
+                "method": request.method
             }
         )
     
     @app.exception_handler(Exception)
     async def general_exception_handler(request, exc):
+        print(f"Unhandled API error: {exc}")
         return JSONResponse(
             status_code=500,
             content={
                 "error": "Internal server error",
+                "message": "An unexpected error occurred",
                 "timestamp": time.time(),
-                "path": str(request.url)
+                "path": str(request.url.path)
             }
         )
+    
+    # Startup event
+    @app.on_event("startup")
+    async def startup_event():
+        print("🚀 FastAPI приложение запущено")
+        print("📚 Документация: http://localhost:8080/docs")
+        print("🔍 ReDoc: http://localhost:8080/redoc")
+        print("📊 Health: http://localhost:8080/health")
+        print("📈 Metrics: http://localhost:8080/metrics")
+    
+    # Shutdown event
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        print("⏹️ FastAPI приложение остановлено")
     
     return app
 

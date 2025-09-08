@@ -105,3 +105,4 @@ def downgrade() -> None:
     op.drop_table('chats')
     op.drop_table('users')
 
+

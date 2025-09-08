@@ -47,3 +47,4 @@ class AntiSpamBot:
         finally:
             await self.bot.session.close()
 
+

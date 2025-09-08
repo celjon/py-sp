@@ -125,3 +125,4 @@ def register_handlers(dp):
     """Регистрация обработчиков сообщений"""
     dp.include_router(router)
 
+
