@@ -1,4 +1,4 @@
-# Конфигурация для продакшена
+# config/production.yaml - Production конфигурация (БЕЗ эвристик и ML)
 database:
   url: "${DATABASE_URL}"
   pool_size: 20
@@ -11,178 +11,114 @@ telegram:
   admin_chat_id: "${ADMIN_CHAT_ID}"
   admin_users: ${ADMIN_USERS}
 
+# Строгие настройки для production (БЕЗ устаревших heuristic и ml)
 spam_detection:
-  # Эвристические проверки (более строгие для продакшена)
-  heuristic:
-    max_emoji: 2           # Строже для продакшена
-    max_caps_ratio: 0.6    # Строже для продакшена
-    max_links: 1           # Строже для продакшена
-    max_mentions: 2        # Строже для продакшена
-    min_message_length: 15 # Длиннее для продакшена
-    spam_threshold: 0.7    # Выше порог для продакшена
-    use_ruspam: true
-    ruspam_min_length: 15
-    russian_threshold: 0.4
-  
-  # ML классификатор
-  ml:
-    enabled: true
-    model_path: "models"
-    spam_threshold: 0.7    # Выше порог для продакшена
-    min_message_length: 50
-    use_bert: true
-    bert_model_name: "RUSpam/spamNS_v1"
-  
-  # Ансамблевый детектор
   ensemble:
-    spam_threshold: 0.7              # Выше порог для продакшена
-    high_confidence_threshold: 0.85  # Выше порог для продакшена
-    openai_veto: true               # В продакшене OpenAI может отменять ложные срабатывания
-    skip_ml_if_detected: true
+    spam_threshold: 0.7          # Выше порог для production
+    high_confidence_threshold: 0.85
+    auto_ban_threshold: 0.9      # Очень высокий порог автобана
+    max_processing_time: 1.5     # Быстрее обработка
+    enable_early_exit: true
+    
+    # RUSpam настройки
+    use_ruspam: true
+    ruspam_min_length: 15        # Длиннее тексты для анализа
+    russian_threshold: 0.4       # Строже определение русского
+    
+    # OpenAI настройки
+    openai_min_length: 10        # Длиннее тексты для LLM
+    use_openai_fallback: true
+    openai_timeout: 3.0          # Меньше таймаут
 
+# RUSpam production
+ruspam:
+  model_name: "RUSpam/spamNS_v1"
+  min_confidence: 0.7            # Выше минимальная уверенность
+  cache_results: true
+  cache_ttl: 1800               # 30 минут
+
+# OpenAI production
 openai:
   api_key: "${OPENAI_API_KEY}"
   model: "gpt-4o-mini"
-  max_tokens: 150
+  max_tokens: 100               # Меньше токенов = быстрее
+  temperature: 0.0
   enabled: true
+  system_prompt: |
+    Ты эксперт по определению спама. Анализируй быстро и точно.
+    
+    СПАМ: реклама, "заработок", финансовые схемы, массовые рассылки.
+    НЕ СПАМ: обычное общение, вопросы, обмен опытом.
+    
+    Ответ JSON: {"is_spam": boolean, "confidence": float, "reason": "краткое объяснение"}
 
+# Внешние API production
 external_apis:
   cas:
     api_url: "https://api.cas.chat/check"
-    timeout: 10        # Больше таймаут для стабильности
-    cache_ttl: 7200    # 2 часа кэширования для продакшена
+    timeout: 3                  # Быстрее таймаут
+    cache_ttl: 7200            # 2 часа кэш
+    retry_attempts: 1          # Меньше попыток
 
+# Строгая модерация
 moderation:
-  auto_ban_threshold: 0.95         # Очень высокий порог для автобана
-  auto_restrict_threshold: 0.8     # Высокий порог для ограничения
+  auto_ban_threshold: 0.95      # Очень высокий порог
+  auto_restrict_threshold: 0.8
   delete_recent_messages: true
-  recent_messages_hours: 2         # Удалять сообщения за последние 2 часа
-  aggressive_cleanup: true         # Агрессивная очистка в продакшене
+  recent_messages_hours: 2      # Удаляем за 2 часа
+  aggressive_cleanup: true
 
+# Production логирование
 logging:
-  level: "WARNING"  # Только важные сообщения в продакшене
+  level: "WARNING"             # Только важные сообщения
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/antispam-bot.log"
-  structured: true   # Структурированные логи для продакшена
-  max_file_size: "100MB"
-  backup_count: 10
+  file: "logs/antispam-bot-prod.log"
+  structured: true            # Структурированные логи
 
+# HTTP Server production
 http_server:
   enabled: true
   host: "0.0.0.0"
   port: 8080
-  workers: 8          # Больше воркеров для продакшена
-  cors_enabled: false # CORS отключен в продакшене
-  ssl_enabled: true   # SSL обязательно в продакшене
+  workers: 4                  # Больше воркеров
+  cors_enabled: false         # Отключаем CORS в production
+  cors_origins: []
 
-# Продакшен не имеет dev_settings
-production_settings:
-  strict_mode: true              # Строгий режим
-  fail_fast: false              # Не падать при ошибке одного детектора
-  enable_fallbacks: true        # Включить fallback механизмы
-  save_detection_details: false # Не сохранять детали для экономии места
+# API production
+api:
+  rate_limit:
+    default_requests_per_minute: 30  # Строже лимиты
+    default_requests_per_day: 2000
+    burst_limit: 5
+  
+  auth:
+    jwt_secret: "${JWT_SECRET}"
+    jwt_algorithm: "HS256"
+    access_token_expire_minutes: 15   # Короче сессии
+    refresh_token_expire_days: 3
+  
+  features:
+    batch_detection: true
+    usage_analytics: true
+    webhook_support: true            # Включаем webhook в production
 
-# Метрики и мониторинг (обязательно в продакшене)
+# Метрики production
 metrics:
   enabled: true
   prometheus_port: 9090
-  collect_detailed: false  # Не детальные метрики для экономии ресурсов
-  
-  # Дополнительные метрики для продакшена
-  alerts:
-    enabled: true
-    high_spam_rate_threshold: 0.5    # Алерт если спам > 50%
-    detection_latency_threshold: 2.0  # Алерт если детекция > 2 сек
-    error_rate_threshold: 0.1        # Алерт если ошибок > 10%
+  collect_detailed: false      # Меньше детальных метрик
 
-# Параметры производительности (оптимизированы для продакшена)
+# Производительность production
 performance:
-  max_concurrent_checks: 50         # Больше одновременных проверок
-  detection_timeout: 2.0            # Строгий таймаут
-  cache_detection_results: 1800     # Кэшировать результаты на 30 минут
-  rate_limit_per_user: 10           # Строгий rate limit в продакшене
-  
-  # Оптимизация памяти
-  gc_threshold: 1000               # Сборка мусора каждые 1000 сообщений
-  max_memory_usage: "2GB"          # Лимит памяти
-  
-  # Оптимизация базы данных
-  db_connection_pool_size: 50
-  db_max_overflow: 100
-  db_pool_timeout: 30
+  max_concurrent_checks: 20    # Больше конкурентных проверок
+  detection_timeout: 1.5       # Быстрее таймаут
+  cache_detection_results: 600 # 10 минут кэш
+  rate_limit_per_user: 10      # Строже лимиты пользователей
 
-# Безопасность (критично для продакшена)
+# Production безопасность
 security:
-  api_authentication: true
-  rate_limiting: true
-  ip_whitelist: []               # Пустой = разрешены все IP
-  max_message_length: 4096       # Лимит длины сообщения
-  
-  # Защита от DoS
-  ddos_protection: true
-  max_requests_per_minute: 1000
-  
-  # Валидация входных данных
-  strict_input_validation: true
-  sanitize_user_input: true
-
-# Интеграция с внешними сервисами (продакшен)
-integrations:
-  telegram_webhook: true    # Webhook для продакшена (быстрее polling)
-  webhook_url: "${WEBHOOK_URL}"
-  webhook_secret: "${WEBHOOK_SECRET}"
-  
-  webhooks:
-    enabled: true
-    verify_ssl: true       # Обязательно проверять SSL
-    max_retries: 3
-    retry_delay: 5
-  
-  # Мониторинг и алерты
-  monitoring:
-    enabled: true
-    health_check_interval: 30    # Проверка здоровья каждые 30 сек
-    
-    # Интеграция с внешними системами
-    sentry_dsn: "${SENTRY_DSN}"                 # Для отслеживания ошибок
-    grafana_webhook: "${GRAFANA_WEBHOOK_URL}"   # Для метрик
-    
-  # Резервное копирование
-  backup:
-    enabled: true
-    interval_hours: 6         # Бэкап каждые 6 часов
-    retention_days: 30        # Хранить 30 дней
-    s3_bucket: "${BACKUP_S3_BUCKET}"
-
-# Высокая доступность (HA)
-high_availability:
-  enabled: true
-  
-  # Множественные экземпляры
-  instances: 3
-  load_balancing: true
-  
-  # Failover
-  health_checks: true
-  failover_timeout: 30
-  
-  # Распределенное кэширование
-  distributed_cache: true
-  cache_sync_interval: 60
-
-# Ресурсы и лимиты (Kubernetes/Docker)
-resources:
-  limits:
-    memory: "2Gi"
-    cpu: "2000m"
-  requests:
-    memory: "1Gi" 
-    cpu: "1000m"
-  
-  # Автомасштабирование
-  auto_scaling:
-    enabled: true
-    min_replicas: 2
-    max_replicas: 10
-    target_cpu_utilization: 70
-    target_memory_utilization: 80
+  enable_ip_whitelist: true
+  allowed_ips: ["${ALLOWED_IPS}"]
+  enable_request_signing: true
+  max_request_size: 1048576    # 1MB
+  enable_ddos_protection: true

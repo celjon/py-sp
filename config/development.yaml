@@ -1,6 +1,6 @@
-# Конфигурация для разработки
+# config/development.yaml - Современная архитектура (БЕЗ эвристик и ML)
 database:
-  url: "postgresql://antispam_user:StrongPassword123!@localhost:5432/antispam_bot"
+  url: "postgresql://antispam:password@localhost:5432/antispam_bot"
   pool_size: 10
 
 redis:
@@ -11,97 +11,133 @@ telegram:
   admin_chat_id: "${ADMIN_CHAT_ID}"
   admin_users: ${ADMIN_USERS}
 
+# Современная детекция спама (БЕЗ устаревших heuristic и ml)
 spam_detection:
-  # Эвристические проверки (самые быстрые)
-  heuristic:
-    max_emoji: 3
-    max_caps_ratio: 0.7
-    max_links: 2
-    max_mentions: 3
-    min_message_length: 10
-    spam_threshold: 0.6
-    use_ruspam: true
-    ruspam_min_length: 10
-    russian_threshold: 0.3
-  
-  # ML классификатор
-  ml:
-    enabled: true
-    model_path: "models"
-    spam_threshold: 0.6
-    min_message_length: 50
-    use_bert: true
-    bert_model_name: "RUSpam/spamNS_v1"
-  
-  # Ансамблевый детектор
   ensemble:
     spam_threshold: 0.6
     high_confidence_threshold: 0.8
-    openai_veto: false  # В dev режиме OpenAI не отменяет другие детекторы
-    skip_ml_if_detected: true  # Пропускать ML если эвристика/CAS уже нашли спам
+    auto_ban_threshold: 0.85
+    max_processing_time: 2.0
+    enable_early_exit: true
+    
+    # RUSpam настройки
+    use_ruspam: true
+    ruspam_min_length: 10
+    russian_threshold: 0.3
+    
+    # OpenAI настройки
+    openai_min_length: 5
+    use_openai_fallback: true
+    openai_timeout: 5.0
 
+# RUSpam BERT модель
+ruspam:
+  model_name: "RUSpam/spamNS_v1"
+  min_confidence: 0.6
+  cache_results: true
+  cache_ttl: 300  # 5 минут
+
+# OpenAI LLM 
 openai:
   api_key: "${OPENAI_API_KEY}"
   model: "gpt-4o-mini"
   max_tokens: 150
+  temperature: 0.0
   enabled: true
+  system_prompt: |
+    Ты эксперт по определению спама в сообщениях чатов.
+    
+    ЗАДАЧА: Определи, является ли сообщение спамом.
+    
+    СПАМ это:
+    - Реклама товаров/услуг без разрешения
+    - Призывы писать в личные сообщения для "заработка"
+    - Финансовые схемы и "быстрые деньги"
+    - Массовые рассылки и копипаста
+    - Навязчивые ссылки на внешние ресурсы
+    - Предложения инвестиций, криптовалют, форекса
+    
+    НЕ СПАМ это:
+    - Обычное общение и вопросы
+    - Обмен опытом по теме чата
+    - Мемы, шутки, реакции
+    - Конструктивная критика
+    - Информативные ссылки по теме
+    
+    ФОРМАТ ОТВЕТА (только JSON):
+    {
+      "is_spam": boolean,
+      "confidence": float (0.0-1.0),
+      "reason": "краткое объяснение на русском"
+    }
 
+# Внешние API
 external_apis:
   cas:
     api_url: "https://api.cas.chat/check"
     timeout: 5
-    cache_ttl: 3600  # 1 час кэширования для разработки
+    cache_ttl: 3600  # 1 час
+    retry_attempts: 2
 
+# Модерация
 moderation:
-  auto_ban_threshold: 0.9      # Автобан при уверенности >= 90%
-  auto_restrict_threshold: 0.7  # Ограничение при уверенности >= 70%
+  auto_ban_threshold: 0.85
+  auto_restrict_threshold: 0.70
   delete_recent_messages: true
-  recent_messages_hours: 1      # Удалять сообщения за последний час
-  aggressive_cleanup: false     # В dev режиме не агрессивная очистка
+  recent_messages_hours: 1
+  aggressive_cleanup: false
 
+# Логирование
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "logs/antispam-bot-dev.log"
-  structured: false  # Обычные логи для разработки
+  structured: false
 
+# HTTP Server
 http_server:
   enabled: true
   host: "0.0.0.0"
   port: 8080
-  workers: 2  # Меньше воркеров для разработки
+  workers: 2
   cors_enabled: true
   cors_origins: ["http://localhost:3000", "http://127.0.0.1:3000"]
 
-# Дополнительные настройки для разработки
-dev_settings:
-  reload_config: true          # Перезагружать конфиг при изменениях
-  debug_mode: true            # Подробная отладочная информация
-  mock_external_apis: false   # Не мокать API в dev (используем реальные)
-  test_mode: false           # Не тестовый режим
-  save_detection_details: true # Сохранять детали детекции для отладки
+# API настройки
+api:
+  rate_limit:
+    default_requests_per_minute: 60
+    default_requests_per_day: 5000
+    burst_limit: 10
+  
+  auth:
+    jwt_secret: "${JWT_SECRET:-dev_secret_change_in_production}"
+    jwt_algorithm: "HS256"
+    access_token_expire_minutes: 30
+    refresh_token_expire_days: 7
+  
+  features:
+    batch_detection: true
+    usage_analytics: true
+    webhook_support: false
 
 # Метрики и мониторинг
 metrics:
   enabled: true
   prometheus_port: 9090
-  collect_detailed: true  # Детальные метрики для разработки
+  collect_detailed: true
 
-# Параметры производительности (relaxed для dev)
+# Производительность
 performance:
-  max_concurrent_checks: 10     # Ограничение одновременных проверок
-  detection_timeout: 5.0        # Таймаут детекции в секундах
-  cache_detection_results: 300  # Кэшировать результаты на 5 минут
-  rate_limit_per_user: 30       # Запросов в минуту на пользователя (больше для dev)
+  max_concurrent_checks: 10
+  detection_timeout: 2.0
+  cache_detection_results: 300
+  rate_limit_per_user: 30
 
-# Интеграция с внешними сервисами
-integrations:
-  telegram_webhook: false  # Polling для разработки
-  webhooks:
-    enabled: false
-    verify_ssl: false    # Для локальных тестов
-  
-  # Дополнительные API для тестирования
-  experimental_apis:
-    enabled: true
-    test_unknown_detectors: true
+# Настройки разработки
+dev_settings:
+  reload_config: false
+  debug_mode: true
+  mock_external_apis: false
+  test_mode: false
+  save_detection_details: true

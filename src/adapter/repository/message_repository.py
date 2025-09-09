@@ -361,3 +361,4 @@ class MessageRepository:
             is_forward=row['is_forward'],
             emoji_count=row['emoji_count']
         )
+

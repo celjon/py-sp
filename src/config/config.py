@@ -1,17 +1,24 @@
+"""
+Production конфигурационные классы
+Современная архитектура: CAS + RUSpam + OpenAI (БЕЗ эвристик и ML)
+"""
 import os
 import yaml
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 from dataclasses import dataclass
+
 
 @dataclass
 class DatabaseConfig:
     url: str
     pool_size: int = 10
 
+
 @dataclass
 class RedisConfig:
     url: str
+
 
 @dataclass
 class TelegramConfig:
@@ -19,21 +26,48 @@ class TelegramConfig:
     admin_chat_id: int
     admin_users: List[int]
 
+
 @dataclass
 class SpamDetectionConfig:
-    heuristic: Dict[str, Any]
-    ml: Dict[str, Any]
+    """
+    Современная конфигурация детекции спама
+    БЕЗ устаревших heuristic и ml параметров
+    """
     ensemble: Dict[str, Any]
+    # Дополнительные настройки (опционально)
+    ruspam: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class RUSpamConfig:
+    """Конфигурация RUSpam BERT модели"""
+    model_name: str = "RUSpam/spamNS_v1"
+    min_confidence: float = 0.6
+    cache_results: bool = True
+    cache_ttl: int = 300
+
 
 @dataclass
 class OpenAIConfig:
     api_key: str
     model: str
     max_tokens: int
-    enabled: bool
+    temperature: float = 0.0
+    enabled: bool = True
+    system_prompt: Optional[str] = None
+
+
+@dataclass
+class APIConfig:
+    """Конфигурация публичного API"""
+    rate_limit: Dict[str, Any]
+    auth: Dict[str, Any]
+    features: Dict[str, Any]
+
 
 @dataclass
 class Config:
+    """Основная конфигурация системы"""
     database: DatabaseConfig
     redis: RedisConfig
     telegram: TelegramConfig
@@ -43,6 +77,13 @@ class Config:
     moderation: Dict[str, Any]
     logging: Dict[str, Any]
     http_server: Dict[str, Any]
+    
+    # Новые секции
+    ruspam: Optional[RUSpamConfig] = None
+    api: Optional[APIConfig] = None
+    metrics: Optional[Dict[str, Any]] = None
+    performance: Optional[Dict[str, Any]] = None
+    security: Optional[Dict[str, Any]] = None
 
     # Удобные свойства совместимости
     @property
@@ -68,6 +109,7 @@ class Config:
     @property
     def log_level(self) -> str:
         return self.logging.get("level", "INFO")
+
 
 def load_config(env: str = None) -> Config:
     """Загрузить конфигурацию для указанного окружения"""
@@ -97,7 +139,6 @@ def load_config(env: str = None) -> Config:
     telegram_data = config_data["telegram"]
     # Обрабатываем admin_users - может быть строкой из env или списком
     admin_users = telegram_data["admin_users"]
-    # Исправление: если admin_users не подставился из env, делаем список пустым
     if isinstance(admin_users, str):
         if admin_users.startswith("${") and admin_users.endswith("}"):
             admin_users = []
@@ -117,25 +158,44 @@ def load_config(env: str = None) -> Config:
     if isinstance(admin_chat_id, str):
         if admin_chat_id.startswith("${") and admin_chat_id.endswith("}"):
             admin_chat_id = 0
-        elif not admin_chat_id.strip():
-            admin_chat_id = 0
         else:
             try:
                 admin_chat_id = int(admin_chat_id)
-            except ValueError as e:
-                print(f"❌ Ошибка парсинга ADMIN_CHAT_ID: {admin_chat_id} ({e})")
+            except ValueError:
                 admin_chat_id = 0
-    else:
-        admin_chat_id = int(admin_chat_id)
-
+    
     telegram_config = TelegramConfig(
         token=telegram_data["token"],
         admin_chat_id=admin_chat_id,
         admin_users=admin_users
     )
     
-    spam_detection_config = SpamDetectionConfig(**config_data["spam_detection"])
-    openai_config = OpenAIConfig(**config_data["openai"])
+    # Современная конфигурация спам-детекции (БЕЗ heuristic и ml)
+    spam_detection_config = SpamDetectionConfig(
+        ensemble=config_data["spam_detection"]["ensemble"],
+        ruspam=config_data["spam_detection"].get("ruspam")
+    )
+    
+    # OpenAI конфигурация
+    openai_data = config_data["openai"]
+    openai_config = OpenAIConfig(
+        api_key=openai_data["api_key"],
+        model=openai_data["model"],
+        max_tokens=openai_data["max_tokens"],
+        temperature=openai_data.get("temperature", 0.0),
+        enabled=openai_data.get("enabled", True),
+        system_prompt=openai_data.get("system_prompt")
+    )
+    
+    # RUSpam конфигурация (если есть)
+    ruspam_config = None
+    if "ruspam" in config_data:
+        ruspam_config = RUSpamConfig(**config_data["ruspam"])
+    
+    # API конфигурация (если есть)
+    api_config = None
+    if "api" in config_data:
+        api_config = APIConfig(**config_data["api"])
     
     return Config(
         database=database_config,
@@ -143,26 +203,20 @@ def load_config(env: str = None) -> Config:
         telegram=telegram_config,
         spam_detection=spam_detection_config,
         openai=openai_config,
-        external_apis=config_data["external_apis"],
-        moderation=config_data["moderation"],
-        logging=config_data["logging"],
-        http_server=config_data["http_server"]
+        external_apis=config_data.get("external_apis", {}),
+        moderation=config_data.get("moderation", {}),
+        logging=config_data.get("logging", {}),
+        http_server=config_data.get("http_server", {}),
+        ruspam=ruspam_config,
+        api=api_config,
+        metrics=config_data.get("metrics"),
+        performance=config_data.get("performance"),
+        security=config_data.get("security")
     )
 
-def _parse_admin_users(admin_users_str: str) -> List[int]:
-    """Парсит строку с ID администраторов"""
-    if not admin_users_str or not admin_users_str.strip():
-        return []
-    
-    # Если строка содержит запятые, разбиваем по запятым
-    if "," in admin_users_str:
-        return [int(x.strip()) for x in admin_users_str.split(",") if x.strip()]
-    else:
-        # Если один ID, создаем список из одного элемента
-        return [int(admin_users_str.strip())] if admin_users_str.strip() else []
 
-def _substitute_env_variables(data: Any) -> Any:
-    """Рекурсивно заменяет ${VAR} на значения переменных окружения"""
+def _substitute_env_variables(data):
+    """Заменяет ${VAR} на значения переменных окружения"""
     if isinstance(data, dict):
         return {key: _substitute_env_variables(value) for key, value in data.items()}
     elif isinstance(data, list):
@@ -173,11 +227,27 @@ def _substitute_env_variables(data: Any) -> Any:
     else:
         return data
 
+
+def _parse_admin_users(admin_users_str: str) -> List[int]:
+    """Парсит строку с admin users в список int"""
+    if not admin_users_str or admin_users_str.startswith("${"):
+        return []
+    
+    try:
+        if "," in admin_users_str:
+            return [int(x.strip()) for x in admin_users_str.split(",") if x.strip()]
+        else:
+            return [int(admin_users_str.strip())] if admin_users_str.strip() else []
+    except ValueError:
+        print(f"⚠️ Неверный формат ADMIN_USERS: {admin_users_str}")
+        return []
+
+
 def _create_default_config() -> Config:
     """Создать конфигурацию по умолчанию из переменных окружения"""
     return Config(
         database=DatabaseConfig(
-            url=os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/antispam_bot")
+            url=os.getenv("DATABASE_URL", "postgresql://antispam:password@localhost:5432/antispam_bot")
         ),
         redis=RedisConfig(
             url=os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -187,19 +257,57 @@ def _create_default_config() -> Config:
             admin_chat_id=int(os.getenv("ADMIN_CHAT_ID", "0")),
             admin_users=_parse_admin_users(os.getenv("ADMIN_USERS", ""))
         ),
+        # СОВРЕМЕННАЯ конфигурация детекции (БЕЗ heuristic и ml!)
         spam_detection=SpamDetectionConfig(
-            heuristic={"spam_threshold": 0.6, "max_emoji": 3},
-            ml={"spam_threshold": 0.6, "use_bert": True},
-            ensemble={"spam_threshold": 0.6}
+            ensemble={
+                "spam_threshold": 0.6,
+                "high_confidence_threshold": 0.8,
+                "auto_ban_threshold": 0.85,
+                "use_ruspam": True,
+                "ruspam_min_length": 10,
+                "openai_min_length": 5,
+                "use_openai_fallback": True
+            }
         ),
         openai=OpenAIConfig(
             api_key=os.getenv("OPENAI_API_KEY", ""),
             model="gpt-4o-mini",
             max_tokens=150,
+            temperature=0.0,
             enabled=bool(os.getenv("OPENAI_API_KEY"))
         ),
-        external_apis={"cas": {"api_url": "https://api.cas.chat/check"}},
-        moderation={"auto_ban_threshold": 0.9},
-        logging={"level": "INFO"},
-        http_server={"enabled": False}
+        external_apis={
+            "cas": {
+                "api_url": "https://api.cas.chat/check",
+                "timeout": 5,
+                "cache_ttl": 3600
+            }
+        },
+        moderation={
+            "auto_ban_threshold": 0.85,
+            "auto_restrict_threshold": 0.70
+        },
+        logging={
+            "level": "INFO"
+        },
+        http_server={
+            "enabled": True,
+            "host": "0.0.0.0", 
+            "port": 8080
+        },
+        ruspam=RUSpamConfig(),
+        api=APIConfig(
+            rate_limit={
+                "default_requests_per_minute": 60,
+                "default_requests_per_day": 5000
+            },
+            auth={
+                "jwt_secret": os.getenv("JWT_SECRET", "dev_secret_change_in_production"),
+                "access_token_expire_minutes": 30
+            },
+            features={
+                "batch_detection": True,
+                "usage_analytics": True
+            }
+        )
     )

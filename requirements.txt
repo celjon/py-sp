@@ -1,60 +1,58 @@
-# Основные зависимости
+# Production Requirements - Современная архитектура
+# БЕЗ устаревших ML библиотек (scikit-learn, pandas, scipy)
+
+# === ОСНОВНЫЕ ЗАВИСИМОСТИ ===
 aiogram>=3.22.0
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 pydantic>=2.5.0
 
-# База данных
+# === БАЗА ДАННЫХ ===
 asyncpg>=0.29.0
 alembic>=1.13.0
 
-# Redis
+# === КЭШИРОВАНИЕ ===
 redis[asyncio]>=5.0.0
 
-# HTTP клиент
+# === HTTP КЛИЕНТ ===
 aiohttp>=3.9.0
 Pillow>=10.0.0
 python-multipart>=0.0.6
 
-# Машинное обучение
-scikit-learn>=1.3.0
-numpy>=1.24.0
-pandas>=2.0.0
+# === СОВРЕМЕННЫЕ AI/ML ДЕТЕКТОРЫ ===
 
-# BERT модели (опционально)
+# OpenAI LLM
+openai>=1.0.0
+
+# RUSpam BERT модель для русского языка
+ruSpam>=0.3.5
+
+# BERT зависимости (только для RUSpam)
 torch>=2.0.0
 transformers>=4.30.0
 tokenizers>=0.13.0
 
-# OpenAI
-openai>=1.0.0
+# Минимальный numpy (только для torch)
+numpy>=1.24.0
 
-# Дополнительные ML библиотеки
-scipy>=1.10.0
-joblib>=1.3.0
-
-# RUSpam library (install ruSpam, import ruSpamLib in code)
-ruSpam>=0.3.5
-
-# Утилиты
-PyYAML>=6.0.1
-python-dotenv>=1.0.0
-structlog>=23.0.0
-prometheus-client>=0.17.0
+# === БЕЗОПАСНОСТЬ И АВТОРИЗАЦИЯ ===
 passlib[bcrypt]>=1.7.4
 python-jose[cryptography]>=3.3.0
 
-# Разработка (опционально)
+# === УТИЛИТЫ ===
+PyYAML>=6.0.1
+python-dotenv>=1.0.0
+structlog>=23.0.0
+APScheduler>=3.10.0
+pytz>=2023.3
+
+# === МОНИТОРИНГ И МЕТРИКИ ===
+prometheus-client>=0.17.0
+
+# === РАЗРАБОТКА (опционально) ===
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 black>=23.0.0
 isort>=5.12.0
 mypy>=1.7.0
-
-# Планировщик и время
-APScheduler>=3.10.0
-pytz>=2023.3
-
-
-
