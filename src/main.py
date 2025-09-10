@@ -47,7 +47,6 @@ from .domain.service.error_handling.error_handler import (
 from .delivery.telegram.bot import TelegramBot
 from .delivery.telegram.handlers import setup_handlers
 
-
 # Global state
 app_state = {
     "telegram_bot": None,
@@ -61,35 +60,47 @@ app_state = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    print("🚀 Starting AntiSpam Bot v2.0...")
+    logger = logging.getLogger(__name__)
+    logger.info("🚀 Starting AntiSpam Bot v2.0...")
     
     try:
         # Startup
         await startup_application()
-        print("✅ Application started successfully")
+        logger.info("✅ Application started successfully")
         
         yield
         
+    except Exception as e:
+        logger.error(f"❌ Startup failed: {e}")
+        raise
     finally:
         # Shutdown
-        print("🛑 Shutting down application...")
-        await shutdown_application()
-        print("✅ Application shutdown complete")
+        logger.info("🛑 Shutting down application...")
+        try:
+            await shutdown_application()
+            logger.info("✅ Application shutdown complete")
+        except Exception as e:
+            logger.error(f"⚠️ Shutdown error: {e}")
 
 
 async def startup_application():
     """Application startup logic"""
+    logger = logging.getLogger(__name__)
+    
     try:
         # Загрузка и валидация конфигурации
         config = load_config()
         validated_config = validate_production_config(config)
+        logger.info("✅ Configuration loaded and validated")
         
         # Настройка логирования
         setup_logging(validated_config)
+        logger.info("✅ Logging configured")
         
         # Инициализация production сервисов
         production_services = await setup_production_services(validated_config)
         app_state["production_services"] = production_services
+        logger.info("✅ Production services initialized")
         
         # Инициализация мониторинга
         metrics = create_prometheus_metrics()
@@ -98,7 +109,11 @@ async def startup_application():
         # Запуск Prometheus сервера
         if validated_config.get("metrics", {}).get("enabled", True):
             metrics_port = validated_config.get("metrics", {}).get("prometheus_port", 9090)
-            metrics.start_metrics_server(metrics_port)
+            try:
+                metrics.start_metrics_server(metrics_port)
+                logger.info(f"✅ Prometheus metrics server started on port {metrics_port}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to start metrics server: {e}")
         
         # Инициализация error handler
         error_handler = create_error_handler(
@@ -106,72 +121,98 @@ async def startup_application():
             config=validated_config.get("error_handling", {})
         )
         app_state["error_handler"] = error_handler
+        logger.info("✅ Error handler configured")
         
         # Запуск Telegram бота если нужно
         run_mode = os.getenv("RUN_MODE", "both").lower()
         if run_mode in ["telegram", "both"]:
             await start_telegram_bot(validated_config, production_services)
+            logger.info("✅ Telegram bot started")
         
-        # Интеграция сервисов с FastAPI
-        integrate_with_fastapi_app(app, production_services, validated_config)
-        
-        # Настройка middleware
-        setup_middleware(app, production_services, metrics, error_handler)
-        
-        # Настройка роутеров
-        setup_routes(app)
-        
-        # Настройка OpenAPI документации
-        setup_openapi_documentation(app)
-        
-        print("🎉 All services initialized successfully!")
+        logger.info("🎉 All services initialized successfully!")
         
     except Exception as e:
-        print(f"❌ Startup failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        logger.error(f"❌ Startup failed: {e}")
+        logger.error(traceback.format_exc())
+        raise
 
 
 async def shutdown_application():
     """Application shutdown logic"""
+    logger = logging.getLogger(__name__)
+    
     try:
         # Устанавливаем событие завершения
         app_state["shutdown_event"].set()
         
         # Останавливаем Telegram бота
         if app_state["telegram_bot"]:
-            await app_state["telegram_bot"].stop()
-            print("✅ Telegram bot stopped")
+            try:
+                await app_state["telegram_bot"].stop()
+                logger.info("✅ Telegram bot stopped")
+            except Exception as e:
+                logger.error(f"⚠️ Error stopping Telegram bot: {e}")
         
         # Закрываем production сервисы
         if app_state["production_services"]:
             services = app_state["production_services"]
             
-            if services.postgres_client:
-                await services.postgres_client.disconnect()
-                print("✅ PostgreSQL disconnected")
+            # Останавливаем метрики сервер
+            if app_state["metrics"]:
+                try:
+                    app_state["metrics"].stop_metrics_server()
+                    logger.info("✅ Metrics server stopped")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error stopping metrics server: {e}")
             
+            # Закрываем PostgreSQL
+            if services.postgres_client:
+                try:
+                    await services.postgres_client.disconnect()
+                    logger.info("✅ PostgreSQL disconnected")
+                except Exception as e:
+                    logger.error(f"⚠️ Error disconnecting PostgreSQL: {e}")
+            
+            # Закрываем Redis
             if services.redis_client:
-                await services.redis_client.disconnect()
-                print("✅ Redis disconnected")
+                try:
+                    await services.redis_client.disconnect()
+                    logger.info("✅ Redis disconnected")
+                except Exception as e:
+                    logger.error(f"⚠️ Error disconnecting Redis: {e}")
         
     except Exception as e:
-        print(f"⚠️ Shutdown error: {e}")
+        logger.error(f"⚠️ Shutdown error: {e}")
+        logger.error(traceback.format_exc())
 
 
 def setup_logging(config: Dict[str, Any]):
     """Настройка системы логирования"""
     log_config = config.get("logging", {})
     
+    # Создаем директорию для логов
+    log_file = log_config.get("file", "logs/antispam-bot.log")
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+    
+    # Настройка обработчиков
+    handlers = [logging.StreamHandler(sys.stdout)]
+    
+    if log_file:
+        handlers.append(
+            logging.FileHandler(log_file, encoding='utf-8')
+        )
+    
     # Настройка основного логгера
     logging.basicConfig(
         level=getattr(logging, log_config.get("level", "INFO")),
-        format=log_config.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_config.get("file", "logs/antispam-bot.log"), encoding='utf-8')
-        ] if log_config.get("file") else [logging.StreamHandler(sys.stdout)]
+        format=log_config.get(
+            "format", 
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        ),
+        handlers=handlers,
+        force=True  # Перезаписываем существующую конфигурацию
     )
     
     # Настройка structured logging если включен
@@ -185,132 +226,92 @@ def setup_logging(config: Dict[str, Any]):
                     structlog.stdlib.add_log_level,
                     structlog.stdlib.PositionalArgumentsFormatter(),
                     structlog.processors.TimeStamper(fmt="iso"),
-                    structlog.processors.StackInfoRenderer(),
-                    structlog.processors.format_exc_info,
-                    structlog.processors.UnicodeDecoder(),
                     structlog.processors.JSONRenderer()
                 ],
-                context_class=dict,
-                logger_factory=structlog.stdlib.LoggerFactory(),
                 wrapper_class=structlog.stdlib.BoundLogger,
+                logger_factory=structlog.stdlib.LoggerFactory(),
                 cache_logger_on_first_use=True,
             )
-            print("✅ Structured logging enabled")
+            print("✅ Structured logging configured")
         except ImportError:
             print("⚠️ structlog not available, using standard logging")
 
 
-async def start_telegram_bot(config: Dict[str, Any], production_services: ProductionServices):
+async def start_telegram_bot(config: Dict[str, Any], services: ProductionServices):
     """Запуск Telegram бота"""
+    logger = logging.getLogger(__name__)
+    
     try:
-        if not config.get("bot_token"):
-            print("⚠️ Bot token not configured, skipping Telegram bot")
-            return
-        
         # Создаем бота
-        telegram_bot = TelegramBot(
-            token=config["bot_token"],
-            admin_chat_id=config.get("admin_chat_id"),
-            production_services=production_services
+        bot = TelegramBot(
+            token=config.get("bot_token") or config.get("telegram", {}).get("token"),
+            config=config.get("telegram", {})
         )
         
-        # Настраиваем handlers
-        setup_handlers(
-            telegram_bot,
-            spam_detector=None,  # TODO: Inject from production_services
-            admin_chat_id=config.get("admin_chat_id")
-        )
+        # Настраиваем обработчики
+        setup_handlers(bot.dp, services)
         
-        # Запускаем бота в фоне
-        asyncio.create_task(telegram_bot.start())
-        app_state["telegram_bot"] = telegram_bot
+        # Запускаем бота
+        await bot.start()
+        app_state["telegram_bot"] = bot
         
-        print("✅ Telegram bot started")
+        logger.info("✅ Telegram bot started successfully")
         
     except Exception as e:
-        print(f"❌ Failed to start Telegram bot: {e}")
+        logger.error(f"❌ Failed to start Telegram bot: {e}")
         raise
 
 
-def setup_middleware(
-    app: FastAPI, 
-    production_services: ProductionServices,
-    metrics: PrometheusMetrics,
-    error_handler: ProductionErrorHandler
-):
-    """Настройка middleware"""
+def setup_middleware(app: FastAPI, services: ProductionServices, metrics: PrometheusMetrics, error_handler):
+    """Настройка middleware для FastAPI"""
     
-    # CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # В production настроить конкретные домены
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS middleware (только для development)
+    if os.getenv("ENVIRONMENT", "development") == "development":
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     
     # Metrics middleware
     app.add_middleware(MetricsMiddleware, metrics=metrics)
     
-    # Global error handler
-    @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
-        """Глобальный обработчик ошибок"""
-        return await error_handler.handle_error(exc, request=request)
-    
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException):
-        """Обработчик HTTP ошибок"""
-        return await error_handler.handle_error(exc, request=request)
-    
-    print("✅ Middleware configured")
+    # API Auth middleware (создается в dependencies)
+    auth_middleware = services.api_auth_middleware(app)
+    # Примечание: auth middleware добавляется через factory pattern в dependencies
 
 
 def setup_routes(app: FastAPI):
     """Настройка маршрутов"""
-    
     # API routes
-    app.include_router(
-        auth_router,
-        prefix="/api/v1/auth",
-        tags=["Authentication"]
-    )
-    
-    app.include_router(
-        public_api_router,
-        prefix="/api/v1",
-        tags=["Public API"]
-    )
-    
-    # Root endpoint
-    @app.get("/", tags=["System"])
-    async def root():
-        """Root endpoint с информацией о системе"""
-        return {
-            "service": "AntiSpam Detection API",
-            "version": "2.0.0",
-            "status": "operational",
-            "documentation": "/docs",
-            "metrics": "/metrics",
-            "health": "/health"
-        }
+    app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])
+    app.include_router(public_api_router, prefix="/api/v1", tags=["Detection"])
     
     # Health check endpoint
     @app.get("/health", tags=["System"])
     async def health_check():
-        """Comprehensive health check"""
+        """Production health check endpoint"""
         try:
             health_data = {
                 "status": "healthy",
-                "timestamp": asyncio.get_event_loop().time(),
                 "version": "2.0.0",
+                "timestamp": time.time(),
                 "components": {}
             }
             
-            # Проверяем production сервисы
+            # Проверяем production services
             if app_state["production_services"]:
                 services_health = app_state["production_services"].health_check()
-                health_data["components"]["services"] = services_health
+                health_data["components"]["production_services"] = services_health
+            
+            # Проверяем Telegram bot
+            if app_state["telegram_bot"]:
+                bot_health = {
+                    "status": "healthy" if app_state["telegram_bot"].is_running else "stopped"
+                }
+                health_data["components"]["telegram_bot"] = bot_health
             
             # Проверяем метрики
             if app_state["metrics"]:
@@ -337,188 +338,204 @@ def setup_routes(app: FastAPI):
             return health_data
             
         except Exception as e:
-            return {
-                "status": "error",
-                "timestamp": asyncio.get_event_loop().time(),
-                "error": str(e)
-            }
+            logger = logging.getLogger(__name__)
+            logger.error(f"Health check failed: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "timestamp": time.time(),
+                    "error": str(e)
+                }
+            )
     
     # Metrics endpoint
     @app.get("/metrics", tags=["System"])
     async def get_metrics():
         """Prometheus metrics endpoint"""
-        if app_state["metrics"]:
-            metrics_data = app_state["metrics"].get_metrics()
+        try:
+            if app_state["metrics"]:
+                metrics_data = app_state["metrics"].get_metrics()
+                return Response(
+                    content=metrics_data,
+                    media_type="text/plain; version=0.0.4; charset=utf-8"
+                )
+            else:
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "Metrics not available"}
+                )
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Metrics endpoint failed: {e}")
             return JSONResponse(
-                content=metrics_data.decode('utf-8'),
-                media_type="text/plain"
+                status_code=500,
+                content={"error": "Internal server error"}
             )
-        else:
-            return {"error": "Metrics not available"}
-    
+
     print("✅ Routes configured")
-
-
-# FastAPI app instance
-app = FastAPI(
-    title="AntiSpam Detection API",
-    description="Production-ready API для высокоточной детекции спама",
-    version="2.0.0",
-    lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
 
 
 def setup_signal_handlers():
     """Настройка обработчиков сигналов для graceful shutdown"""
     def signal_handler(signum, frame):
-        print(f"\n🛑 Received signal {signum}, initiating graceful shutdown...")
-        app_state["shutdown_event"].set()
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-
-async def run_telegram_only():
-    """Запуск только Telegram бота"""
-    print("🤖 Starting Telegram bot only...")
-    
-    try:
-        config = load_config()
-        production_services = await setup_production_services(config)
+        logger = logging.getLogger(__name__)
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
         
-        await start_telegram_bot(config, production_services)
+        # Устанавливаем событие завершения
+        if app_state["shutdown_event"]:
+            app_state["shutdown_event"].set()
         
-        # Ждем сигнала завершения
-        await app_state["shutdown_event"].wait()
-        
-    except KeyboardInterrupt:
-        print("\n🛑 Interrupted by user")
-    finally:
-        await shutdown_application()
+        # Для synchronous contexts
+        if hasattr(asyncio, '_get_running_loop'):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(shutdown_application())
+            except RuntimeError:
+                pass
+    
+    # Регистрируем обработчики для UNIX сигналов
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, signal_handler)
+    if hasattr(signal, 'SIGINT'):
+        signal.signal(signal.SIGINT, signal_handler)
 
 
-async def run_http_only():
-    """Запуск только HTTP API"""
-    print("🌐 Starting HTTP API only...")
-    
-    config = load_config()
-    http_config = config.get("http_server", {})
-    
-    # Настройка uvicorn
-    uvicorn_config = uvicorn.Config(
-        app,
-        host=http_config.get("host", "0.0.0.0"),
-        port=http_config.get("port", 8080),
-        workers=1,  # В lifespan режиме workers должен быть 1
-        log_level=config.get("logging", {}).get("level", "info").lower(),
-        access_log=True,
-        use_colors=True
+# FastAPI app instance
+def create_app() -> FastAPI:
+    """Factory function для создания FastAPI приложения"""
+    return FastAPI(
+        title="AntiSpam Detection API",
+        description="Production-ready API для высокоточной детекции спама в Telegram",
+        version="2.0.0",
+        lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+        # Production settings
+        debug=os.getenv("DEBUG", "false").lower() == "true",
+        # Security headers
+        responses={
+            422: {"description": "Validation Error"},
+            429: {"description": "Rate Limit Exceeded"},
+            500: {"description": "Internal Server Error"}
+        }
     )
-    
-    server = uvicorn.Server(uvicorn_config)
+
+
+app = create_app()
+
+# Настройка signal handlers
+setup_signal_handlers()
+
+# Интеграция с приложением после создания
+async def setup_app_components():
+    """Настройка компонентов после создания приложения"""
+    logger = logging.getLogger(__name__)
     
     try:
-        await server.serve()
-    except KeyboardInterrupt:
-        print("\n🛑 Interrupted by user")
-
-
-async def run_both():
-    """Запуск и Telegram бота, и HTTP API"""
-    print("🚀 Starting both Telegram bot and HTTP API...")
-    
-    config = load_config()
-    http_config = config.get("http_server", {})
-    
-    # Настройка uvicorn для combined режима
-    uvicorn_config = uvicorn.Config(
-        app,
-        host=http_config.get("host", "0.0.0.0"),
-        port=http_config.get("port", 8080),
-        workers=1,
-        log_level=config.get("logging", {}).get("level", "info").lower(),
-        access_log=True,
-        use_colors=True
-    )
-    
-    server = uvicorn.Server(uvicorn_config)
-    
-    try:
-        await server.serve()
-    except KeyboardInterrupt:
-        print("\n🛑 Interrupted by user")
-
-
-def check_environment():
-    """Проверка окружения перед запуском"""
-    print("🔍 Checking environment...")
-    
-    # Проверка Python версии
-    if sys.version_info < (3, 8):
-        print("❌ Python 3.8+ required")
-        sys.exit(1)
-    
-    # Проверка обязательных переменных окружения
-    required_env_vars = ["DATABASE_URL"]
-    missing_vars = []
-    
-    for var in required_env_vars:
-        if not os.getenv(var):
-            missing_vars.append(var)
-    
-    if missing_vars:
-        print(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
-        print("   Please check your .env file")
-        sys.exit(1)
-    
-    print("✅ Environment check passed")
+        # Получаем сервисы из app state после startup
+        services = app_state.get("production_services")
+        metrics = app_state.get("metrics")
+        error_handler = app_state.get("error_handler")
+        
+        if services and metrics and error_handler:
+            # Настройка middleware
+            setup_middleware(app, services, metrics, error_handler)
+            
+            # Настройка роутеров
+            setup_routes(app)
+            
+            # Настройка OpenAPI документации
+            setup_openapi_documentation(app)
+            
+            logger.info("✅ App components configured")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to setup app components: {e}")
+        raise
 
 
 async def main():
     """Основная функция приложения"""
-    print("=" * 60)
-    print("🛡️  ANTISPAM BOT v2.0 - PRODUCTION READY")
-    print("🏗️  Modern Architecture: CAS + RUSpam + OpenAI")
-    print("=" * 60)
-    
-    # Проверка окружения
-    check_environment()
-    
-    # Настройка signal handlers
-    setup_signal_handlers()
-    
-    # Определение режима запуска
-    run_mode = os.getenv("RUN_MODE", "both").lower()
-    
-    print(f"🎯 Run mode: {run_mode}")
+    logger = logging.getLogger(__name__)
     
     try:
+        # Определяем режим запуска
+        run_mode = os.getenv("RUN_MODE", "both").lower()
+        environment = os.getenv("ENVIRONMENT", "development")
+        
+        logger.info(f"🚀 Starting AntiSpam Bot v2.0 in {run_mode} mode ({environment})")
+        
         if run_mode == "telegram":
-            await run_telegram_only()
-        elif run_mode == "http":
-            await run_http_only()
-        elif run_mode == "both":
-            await run_both()
-        else:
-            print(f"❌ Invalid RUN_MODE: {run_mode}")
-            print("   Valid options: telegram, http, both")
-            sys.exit(1)
+            # Только Telegram bot
+            config = load_config()
+            validated_config = validate_production_config(config)
+            setup_logging(validated_config)
             
+            services = await setup_production_services(validated_config)
+            await start_telegram_bot(validated_config, services)
+            
+            # Ждем завершения
+            while not app_state["shutdown_event"].is_set():
+                await asyncio.sleep(1)
+                
+        elif run_mode == "http":
+            # Только HTTP API
+            setup_app_components()
+            
+            # Запуск uvicorn сервера
+            uvicorn_config = {
+                "host": os.getenv("HOST", "0.0.0.0"),
+                "port": int(os.getenv("PORT", 8080)),
+                "reload": environment == "development",
+                "log_level": "info",
+                "access_log": True,
+                "use_colors": environment == "development",
+                "workers": 1 if environment == "development" else int(os.getenv("WORKERS", 4))
+            }
+            
+            logger.info(f"🌐 Starting HTTP server on {uvicorn_config['host']}:{uvicorn_config['port']}")
+            await uvicorn.run(app, **uvicorn_config)
+            
+        else:  # both
+            # HTTP + Telegram
+            await setup_app_components()
+            
+            # Запуск в отдельной задаче
+            uvicorn_config = {
+                "host": os.getenv("HOST", "0.0.0.0"),
+                "port": int(os.getenv("PORT", 8080)),
+                "reload": False,  # Отключаем reload для production
+                "log_level": "info",
+                "access_log": True,
+                "workers": 1  # Один worker для совместного режима
+            }
+            
+            server_task = asyncio.create_task(
+                uvicorn.run(app, **uvicorn_config)
+            )
+            
+            # Ждем завершения
+            try:
+                await server_task
+            except KeyboardInterrupt:
+                logger.info("👋 Received shutdown signal")
+                server_task.cancel()
+                
+                try:
+                    await server_task
+                except asyncio.CancelledError:
+                    pass
+    
+    except KeyboardInterrupt:
+        logger.info("👋 Received KeyboardInterrupt, shutting down...")
     except Exception as e:
-        print(f"❌ Application failed: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Application failed: {e}")
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    try:
-        # Запуск приложения
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
-    except Exception as e:
-        print(f"❌ Fatal error: {e}")
-        sys.exit(1)
+    # Запуск приложения
+    asyncio.run(main())

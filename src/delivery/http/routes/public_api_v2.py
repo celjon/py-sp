@@ -1,21 +1,26 @@
 # src/delivery/http/routes/public_api_v2.py
 """
-Production-ready Public API Routes v2.0
-Основные endpoints для детекции спама с полной интеграцией аналитики
+Production-ready Public API Routes v2.0 - РЕАЛЬНАЯ детекция спама
+Основные endpoints для детекции спама с полной интеграцией ensemble detector
 """
 
 import time
 import traceback
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Union
 from fastapi import APIRouter, HTTPException, Request, Depends, status, BackgroundTasks
 from pydantic import BaseModel, Field, validator
+import logging
 
 from ....config.dependencies import get_dependencies_for_routes
 from ....domain.service.analytics.usage_analytics import UsageAnalytics
+from ....domain.usecase.spam_detection.check_message import CheckMessageUseCase
+from ....domain.entity.message import Message
 from ....domain.entity.client_usage import RequestStatus, ApiUsageRecord
 from ....domain.entity.api_key import ApiKey
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Получаем dependency providers
@@ -88,7 +93,7 @@ class DetectionResponse(BaseModel):
             "example": {
                 "is_spam": True,
                 "confidence": 0.85,
-                "primary_reason": "openai",
+                "primary_reason": "openai_detected",
                 "reasons": ["promotional_content", "urgent_language", "contact_request"],
                 "recommended_action": "ban_and_delete",
                 "notes": "Обнаружена реклама с призывом к контакту в ЛС",
@@ -128,22 +133,26 @@ class HealthResponse(BaseModel):
 # === HELPER FUNCTIONS ===
 
 def get_authenticated_api_key(request: Request) -> ApiKey:
-    """Получает аутентифицированный API ключ из request state"""
-    if not hasattr(request.state, 'api_key') or not request.state.api_key:
+    """Получает аутентифицированный API ключ из request"""
+    api_key = getattr(request.state, 'api_key', None)
+    if not api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
+            detail="API key required"
         )
-    return request.state.api_key
+    return api_key
 
 
 def get_client_info(request: Request) -> Dict[str, Any]:
     """Извлекает информацию о клиенте"""
+    client_host = getattr(request.client, 'host', 'unknown') if request.client else 'unknown'
+    
     return {
-        "ip": getattr(request.state, 'client_ip', 'unknown'),
+        "ip": client_host,
         "user_agent": request.headers.get("User-Agent", "unknown"),
-        "auth_method": getattr(request.state, 'auth_method', 'unknown'),
-        "request_id": request.headers.get("X-Request-ID", f"req_{int(time.time())}")
+        "method": request.method,
+        "endpoint": str(request.url.path),
+        "timestamp": time.time()
     }
 
 
@@ -158,90 +167,89 @@ async def track_api_usage(
     client_info: Dict[str, Any],
     request_size: int = 0,
     response_size: int = 0,
-    is_spam_detected: bool = None,
-    detection_confidence: float = None,
     detection_reason: str = None
 ):
-    """Фоновая задача для записи использования API"""
+    """Записывает использование API в фоновом режиме"""
+    
     def track_usage():
         try:
-            # Создаем запись в фоне (не блокируем ответ)
-            asyncio.create_task(usage_analytics.track_api_request(
-                api_key=api_key,
+            usage_record = ApiUsageRecord(
+                api_key_id=api_key.id,
                 endpoint=endpoint,
                 method=method,
                 status=status,
                 processing_time_ms=processing_time_ms,
                 request_size_bytes=request_size,
                 response_size_bytes=response_size,
-                client_ip=client_info.get("ip"),
-                user_agent=client_info.get("user_agent"),
-                is_spam_detected=is_spam_detected,
-                detection_confidence=detection_confidence,
-                detection_reason=detection_reason
-            ))
+                client_ip=client_info["ip"],
+                user_agent=client_info["user_agent"],
+                detection_reason=detection_reason,
+                timestamp=datetime.utcnow()
+            )
+            
+            # Добавляем в background task
+            background_tasks.add_task(
+                usage_analytics.record_api_usage,
+                usage_record
+            )
         except Exception as e:
-            print(f"Error tracking API usage: {e}")
+            logger.error(f"Failed to track API usage: {e}")
     
-    background_tasks.add_task(track_usage)
+    track_usage()
 
 
-# === MAIN API ENDPOINTS ===
+# === API ENDPOINTS ===
 
 @router.post(
     "/detect",
     response_model=DetectionResponse,
     summary="Детекция спама",
-    description="Проверяет текст на спам используя современные ML модели"
+    description="Проверяет сообщение на спам с помощью ensemble детектора (CAS + RUSpam + OpenAI)"
 )
 async def detect_spam(
     request_data: DetectionRequest,
     request: Request,
     background_tasks: BackgroundTasks,
-    spam_detector = Depends(lambda: None),  # TODO: Inject spam detector
-    usage_analytics: UsageAnalytics = Depends(deps["get_usage_analytics"])
+    usage_analytics: UsageAnalytics = Depends(deps["get_usage_analytics"]),
+    check_message_usecase: CheckMessageUseCase = Depends(deps["get_check_message_usecase"])
 ):
-    """Основной endpoint для детекции спама"""
+    """
+    РЕАЛЬНАЯ детекция спама через production ensemble detector
+    """
     start_time = time.time()
     api_key = get_authenticated_api_key(request)
     client_info = get_client_info(request)
     
-    detection_id = f"det_{int(time.time())}{hash(request_data.text) % 10000:04d}"
+    detection_id = f"det_{uuid.uuid4().hex[:16]}"
+    
+    logger.info(f"🔍 Detection request {detection_id}: '{request_data.text[:50]}{'...' if len(request_data.text) > 50 else ''}'")
     
     try:
-        # TODO: Implement actual spam detection
-        # Временная заглушка для демонстрации
-        import random
+        # Создаем domain объект Message
+        message = Message(
+            id=None,  # API message
+            text=request_data.text,
+            user_id=request_data.context.get("user_id") if request_data.context else None,
+            chat_id=request_data.context.get("chat_id") if request_data.context else None,
+            timestamp=datetime.utcnow()
+        )
         
-        # Симуляция детекции
-        await asyncio.sleep(0.1)  # Имитация обработки
+        # Подготавливаем контекст пользователя
+        user_context = request_data.context or {}
+        user_context.update({
+            "api_request": True,
+            "client_ip": client_info["ip"],
+            "api_key_plan": api_key.plan.value
+        })
         
-        is_spam = "заработ" in request_data.text.lower() or "СРОЧНО" in request_data.text
-        confidence = random.uniform(0.7, 0.95) if is_spam else random.uniform(0.1, 0.4)
-        
-        reasons = []
-        if is_spam:
-            if "заработ" in request_data.text.lower():
-                reasons.append("financial_scheme")
-            if "СРОЧНО" in request_data.text:
-                reasons.append("urgent_language")
-            if "ЛС" in request_data.text:
-                reasons.append("contact_request")
-        
-        primary_reason = reasons[0] if reasons else "heuristics"
-        
-        recommended_action = "allow"
-        if is_spam:
-            if confidence > 0.85:
-                recommended_action = "ban_and_delete"
-            elif confidence > 0.7:
-                recommended_action = "delete_and_warn"
-            else:
-                recommended_action = "soft_warn_or_review"
-        
-        notes = "Автоматическая детекция спама" if is_spam else "Сообщение выглядит безопасным"
+        # ВЫПОЛНЯЕМ РЕАЛЬНУЮ ДЕТЕКЦИЮ через CheckMessageUseCase
+        detection_result = await check_message_usecase.execute(message, user_context)
         
         processing_time_ms = (time.time() - start_time) * 1000
+        
+        # Логируем результат
+        result_emoji = "🚨" if detection_result.is_spam else "✅"
+        logger.info(f"{result_emoji} Detection {detection_id}: spam={detection_result.is_spam}, confidence={detection_result.overall_confidence:.3f}, время={processing_time_ms:.1f}ms")
         
         # Записываем использование API
         await track_api_usage(
@@ -254,19 +262,24 @@ async def detect_spam(
             processing_time_ms=processing_time_ms,
             client_info=client_info,
             request_size=len(request_data.text.encode('utf-8')),
-            response_size=500,  # Примерный размер ответа
-            is_spam_detected=is_spam,
-            detection_confidence=confidence,
-            detection_reason=primary_reason
+            response_size=0,  # Будет обновлено после сериализации
+            detection_reason=detection_result.primary_reason.value if detection_result.primary_reason else "unknown"
         )
         
+        # Формируем ответ API
+        reasons = []
+        if detection_result.detector_results:
+            for detector_result in detection_result.detector_results:
+                if detector_result.is_spam and detector_result.details:
+                    reasons.append(detector_result.details)
+        
         return DetectionResponse(
-            is_spam=is_spam,
-            confidence=round(confidence, 3),
-            primary_reason=primary_reason,
+            is_spam=detection_result.is_spam,
+            confidence=round(detection_result.overall_confidence, 3),
+            primary_reason=detection_result.primary_reason.value if detection_result.primary_reason else "unknown",
             reasons=reasons,
-            recommended_action=recommended_action,
-            notes=notes,
+            recommended_action=detection_result.recommended_action,
+            notes=detection_result.notes,
             processing_time_ms=round(processing_time_ms, 2),
             detection_id=detection_id,
             api_version="2.0"
@@ -287,8 +300,8 @@ async def detect_spam(
             client_info=client_info
         )
         
-        print(f"Detection error: {e}")
-        print(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Detection error {detection_id}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -304,56 +317,113 @@ async def detect_spam(
     "/detect/batch",
     response_model=BatchDetectionResponse,
     summary="Batch детекция спама",
-    description="Проверяет множество сообщений за один запрос (до 100 штук)"
+    description="Проверяет множество сообщений за один запрос (до 100 штук) используя РЕАЛЬНУЮ детекцию"
 )
 async def batch_detect_spam(
     request_data: BatchDetectionRequest,
     request: Request,
     background_tasks: BackgroundTasks,
-    usage_analytics: UsageAnalytics = Depends(deps["get_usage_analytics"])
+    usage_analytics: UsageAnalytics = Depends(deps["get_usage_analytics"]),
+    check_message_usecase: CheckMessageUseCase = Depends(deps["get_check_message_usecase"])
 ):
-    """Batch детекция для множества сообщений"""
+    """РЕАЛЬНАЯ batch детекция через production ensemble detector"""
     start_time = time.time()
     api_key = get_authenticated_api_key(request)
     client_info = get_client_info(request)
     
-    batch_id = f"batch_{int(time.time())}{len(request_data.messages):03d}"
+    batch_id = f"batch_{uuid.uuid4().hex[:12]}"
+    
+    logger.info(f"🔍 Batch detection {batch_id}: {len(request_data.messages)} сообщений")
     
     try:
         results = []
         spam_count = 0
         total_confidence = 0.0
+        detection_times = []
         
-        # Обрабатываем каждое сообщение
-        for i, message in enumerate(request_data.messages):
+        # Обрабатываем каждое сообщение РЕАЛЬНОЙ детекцией
+        for i, message_req in enumerate(request_data.messages):
             detection_start = time.time()
             
-            # Симуляция детекции (TODO: заменить на реальную)
-            import random
-            await asyncio.sleep(0.05)  # Имитация обработки
-            
-            is_spam = "заработ" in message.text.lower() or "СРОЧНО" in message.text
-            confidence = random.uniform(0.7, 0.95) if is_spam else random.uniform(0.1, 0.4)
-            
-            if is_spam:
-                spam_count += 1
-            total_confidence += confidence
-            
-            detection_time = (time.time() - detection_start) * 1000
-            detection_id = f"{batch_id}_msg_{i:03d}"
-            
-            result = DetectionResponse(
-                is_spam=is_spam,
-                confidence=round(confidence, 3),
-                primary_reason="heuristics" if is_spam else "clean",
-                reasons=["batch_detection"] if is_spam else [],
-                recommended_action="delete_and_warn" if is_spam else "allow",
-                notes=f"Batch detection #{i+1}",
-                processing_time_ms=round(detection_time, 2),
-                detection_id=detection_id,
-                api_version="2.0"
-            )
-            results.append(result)
+            try:
+                # Создаем domain объект Message
+                message = Message(
+                    id=None,  # API message
+                    text=message_req.text,
+                    user_id=message_req.context.get("user_id") if message_req.context else None,
+                    chat_id=message_req.context.get("chat_id") if message_req.context else None,
+                    timestamp=datetime.utcnow()
+                )
+                
+                # Подготавливаем контекст
+                user_context = message_req.context or {}
+                user_context.update({
+                    "api_request": True,
+                    "batch_request": True,
+                    "batch_id": batch_id,
+                    "message_index": i,
+                    "client_ip": client_info["ip"],
+                    "api_key_plan": api_key.plan.value
+                })
+                
+                # ВЫПОЛНЯЕМ РЕАЛЬНУЮ ДЕТЕКЦИЮ
+                detection_result = await check_message_usecase.execute(message, user_context)
+                
+                detection_time_ms = (time.time() - detection_start) * 1000
+                detection_times.append(detection_time_ms)
+                
+                # Формируем результат
+                if detection_result.is_spam:
+                    spam_count += 1
+                
+                total_confidence += detection_result.overall_confidence
+                
+                detection_id = f"{batch_id}_msg_{i:03d}"
+                
+                # Собираем reasons из detector results
+                reasons = []
+                if detection_result.detector_results:
+                    for detector_result in detection_result.detector_results:
+                        if detector_result.is_spam and detector_result.details:
+                            reasons.append(detector_result.details)
+                
+                result = DetectionResponse(
+                    is_spam=detection_result.is_spam,
+                    confidence=round(detection_result.overall_confidence, 3),
+                    primary_reason=detection_result.primary_reason.value if detection_result.primary_reason else "unknown",
+                    reasons=reasons,
+                    recommended_action=detection_result.recommended_action,
+                    notes=detection_result.notes,
+                    processing_time_ms=round(detection_time_ms, 2),
+                    detection_id=detection_id,
+                    api_version="2.0"
+                )
+                results.append(result)
+                
+                # Логируем каждый результат
+                result_emoji = "🚨" if detection_result.is_spam else "✅"
+                logger.debug(f"{result_emoji} Batch msg {i}: spam={detection_result.is_spam}, conf={detection_result.overall_confidence:.3f}")
+                
+            except Exception as e:
+                # Обработка ошибки отдельного сообщения
+                logger.error(f"❌ Batch message {i} error: {e}")
+                
+                detection_time_ms = (time.time() - detection_start) * 1000
+                detection_times.append(detection_time_ms)
+                
+                # Fallback результат
+                result = DetectionResponse(
+                    is_spam=False,
+                    confidence=0.0,
+                    primary_reason="detection_error",
+                    reasons=[f"Error: {str(e)}"],
+                    recommended_action="allow",
+                    notes=f"Ошибка детекции сообщения #{i}: {str(e)}",
+                    processing_time_ms=round(detection_time_ms, 2),
+                    detection_id=f"{batch_id}_msg_{i:03d}_error",
+                    api_version="2.0"
+                )
+                results.append(result)
         
         total_processing_time_ms = (time.time() - start_time) * 1000
         
@@ -364,7 +434,9 @@ async def batch_detect_spam(
             "clean_detected": len(request_data.messages) - spam_count,
             "spam_rate": round((spam_count / len(request_data.messages)) * 100, 2),
             "avg_confidence": round(total_confidence / len(request_data.messages), 3),
-            "avg_processing_time_per_message_ms": round(total_processing_time_ms / len(request_data.messages), 2)
+            "avg_processing_time_per_message_ms": round(sum(detection_times) / len(detection_times), 2),
+            "max_processing_time_ms": round(max(detection_times) if detection_times else 0, 2),
+            "min_processing_time_ms": round(min(detection_times) if detection_times else 0, 2)
         }
         
         # Записываем использование API
@@ -383,6 +455,8 @@ async def batch_detect_spam(
             response_size=len(str(results)),  # Примерный размер
             detection_reason=f"batch_processing_{len(request_data.messages)}_messages"
         )
+        
+        logger.info(f"✅ Batch detection {batch_id} завершен: {spam_count}/{len(request_data.messages)} спам, время={total_processing_time_ms:.1f}ms")
         
         return BatchDetectionResponse(
             results=results,
@@ -406,7 +480,9 @@ async def batch_detect_spam(
             client_info=client_info
         )
         
-        print(f"Batch detection error: {e}")
+        logger.error(f"Batch detection error {batch_id}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -432,49 +508,121 @@ async def get_usage_stats(
     try:
         api_key = get_authenticated_api_key(request)
         
+        logger.info(f"📊 Запрос статистики для API key {api_key.id} за {hours} часов")
+        
         # Получаем метрики использования
-        metrics = await usage_analytics.get_real_time_metrics(api_key.id, hours * 60)
+        try:
+            metrics = await usage_analytics.get_real_time_metrics(api_key.id, hours * 60)
+        except Exception as e:
+            logger.error(f"Failed to get real-time metrics: {e}")
+            # Fallback метрики
+            metrics = {
+                "total_requests": 0,
+                "spam_detected": 0,
+                "avg_processing_time_ms": 0,
+                "error_rate": 0
+            }
         
         # Получаем billing информацию
-        end_time = datetime.utcnow()
-        start_time = end_time - timedelta(hours=hours)
-        billing_metrics = await usage_analytics.get_billing_metrics(
-            api_key_id=api_key.id,
-            start_date=start_time,
-            end_date=end_time
-        )
+        try:
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(hours=hours)
+            billing_metrics = await usage_analytics.get_billing_metrics(
+                api_key_id=api_key.id,
+                start_date=start_time,
+                end_date=end_time
+            )
+        except Exception as e:
+            logger.error(f"Failed to get billing metrics: {e}")
+            # Fallback billing
+            billing_metrics = {
+                "period_start": (datetime.utcnow() - timedelta(hours=hours)).isoformat(),
+                "period_end": datetime.utcnow().isoformat(),
+                "total_cost": 0.0,
+                "total_requests": 0
+            }
         
         return UsageStatsResponse(
             api_key_info={
-                "id": api_key.id,
+                "id": str(api_key.id),
                 "client_name": api_key.client_name,
                 "plan": api_key.plan.value,
                 "status": api_key.status.value,
-                "created_at": api_key.created_at.isoformat()
+                "created_at": api_key.created_at.isoformat(),
+                "expires_at": api_key.expires_at.isoformat() if api_key.expires_at else None
             },
-            usage_stats=metrics.to_dict(),
+            usage_stats=metrics if isinstance(metrics, dict) else metrics.to_dict(),
             rate_limits={
                 "current": api_key.get_rate_limits(),
-                "remaining": {
-                    "requests_per_minute": max(0, api_key.requests_per_minute - getattr(metrics, 'current_minute', 0)),
-                    "requests_per_day": max(0, api_key.requests_per_day - getattr(metrics, 'current_day', 0))
-                }
+                "remaining": api_key.get_remaining_limits(),
+                "reset_time": api_key.get_reset_time()
             },
-            billing_period={
-                "start": start_time.isoformat(),
-                "end": end_time.isoformat(),
-                "hours": hours
-            },
+            billing_period=billing_metrics,
             generated_at=datetime.utcnow().isoformat()
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Usage stats error: {e}")
+        logger.error(f"Stats endpoint error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get usage statistics"
+            detail=f"Failed to get usage stats: {str(e)}"
+        )
+
+
+@router.get(
+    "/detectors",
+    summary="Информация о детекторах",
+    description="Возвращает статус доступных детекторов спама"
+)
+async def get_detectors_info(
+    ensemble_detector = Depends(deps["get_ensemble_detector"])
+):
+    """Информация о доступных детекторах"""
+    try:
+        # Получаем health check всех детекторов
+        health = await ensemble_detector.health_check()
+        
+        # Получаем список доступных детекторов
+        available_detectors = await ensemble_detector.get_available_detectors()
+        
+        # Получаем performance stats
+        performance_stats = await ensemble_detector.get_performance_stats()
+        
+        return {
+            "api_version": "2.0",
+            "architecture": "modern",
+            "detectors": {
+                "available": available_detectors,
+                "details": health.get("detectors", {}),
+                "status": health.get("status", "unknown")
+            },
+            "performance": {
+                "stats": performance_stats,
+                "config": {
+                    "max_processing_time": ensemble_detector.max_processing_time,
+                    "spam_threshold": ensemble_detector.spam_threshold,
+                    "auto_ban_threshold": ensemble_detector.auto_ban_threshold
+                }
+            },
+            "features": [
+                "CAS banned users database",
+                "RUSpam BERT model for Russian",
+                "OpenAI LLM contextual analysis",
+                "Early exit optimization",
+                "Circuit breaker pattern",
+                "Performance monitoring"
+            ],
+            "languages_supported": ["ru", "en", "mixed"],
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Detectors info error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get detectors info: {str(e)}"
         )
 
 
@@ -482,55 +630,40 @@ async def get_usage_stats(
     "/health",
     response_model=HealthResponse,
     summary="Health check",
-    description="Проверка работоспособности API"
+    description="Проверка состояния API и всех компонентов"
 )
-async def health_check():
-    """Health check для публичного API"""
+async def health_check(
+    ensemble_detector = Depends(deps["get_ensemble_detector"])
+):
+    """Production health check endpoint"""
     try:
-        check_time = time.time()
+        # Проверяем ensemble detector
+        detector_health = await ensemble_detector.health_check()
         
-        # Базовые проверки
-        components = {
-            "api": {"status": "healthy", "response_time_ms": 0},
-            "database": {"status": "unknown"},  # TODO: проверка БД
-            "cache": {"status": "unknown"},     # TODO: проверка Redis
-            "spam_detector": {"status": "unknown"}  # TODO: проверка детектора
-        }
-        
-        # Тест производительности
-        performance = {
-            "avg_response_time_ms": 150,  # Примерные значения
-            "requests_per_second": 100,
-            "memory_usage_mb": 256,
-            "cpu_usage_percent": 15
-        }
-        
-        # Определяем общий статус
-        overall_status = "healthy"
-        for component in components.values():
-            if component.get("status") == "error":
-                overall_status = "error"
-                break
-            elif component.get("status") == "degraded":
-                overall_status = "degraded"
-        
-        response_time = (time.time() - check_time) * 1000
-        components["api"]["response_time_ms"] = round(response_time, 2)
+        # Проверяем performance stats
+        performance_stats = await ensemble_detector.get_performance_stats()
         
         return HealthResponse(
-            status=overall_status,
+            status=detector_health.get("status", "unknown"),
             timestamp=time.time(),
             version="2.0.0",
-            components=components,
-            performance=performance
+            components={
+                "ensemble_detector": detector_health,
+                "api": {"status": "healthy"}
+            },
+            performance=performance_stats
         )
         
     except Exception as e:
+        logger.error(f"Health check failed: {e}")
         return HealthResponse(
             status="error",
             timestamp=time.time(),
             version="2.0.0",
-            components={"api": {"status": "error", "error": str(e)}},
+            components={
+                "ensemble_detector": {"status": "error", "error": str(e)},
+                "api": {"status": "degraded"}
+            },
             performance={}
         )
 
@@ -545,14 +678,18 @@ async def get_api_info():
     return {
         "api_name": "AntiSpam Detection API",
         "version": "2.0.0",
-        "description": "Production-ready API для детекции спама с поддержкой русского и английского языков",
+        "description": "Production-ready API для высокоточной детекции спама в Telegram",
+        "architecture": "CAS + RUSpam + OpenAI (NO legacy heuristics)",
         "features": [
-            "Многослойная детекция: CAS + RUSpam + OpenAI",
-            "Batch обработка до 100 сообщений",
-            "Real-time статистика использования",
-            "JWT аутентификация",
-            "Rate limiting по API ключам",
-            "Детальная аналитика и мониторинг"
+            "🛡️ CAS - мгновенная проверка базы забаненных",
+            "🤖 RUSpam - BERT модель для русского языка",
+            "🧠 OpenAI - LLM контекстуальный анализ",
+            "⚡ Early exit optimization для производительности",
+            "🔄 Circuit breaker pattern для reliability",
+            "📊 Real-time метрики и мониторинг",
+            "🔐 JWT аутентификация с refresh tokens",
+            "🚦 Rate limiting по API ключам",
+            "📈 Детальная аналитика использования"
         ],
         "endpoints": {
             "detection": {
@@ -560,7 +697,8 @@ async def get_api_info():
                 "batch": "POST /api/v1/detect/batch"
             },
             "analytics": {
-                "usage_stats": "GET /api/v1/stats"
+                "usage_stats": "GET /api/v1/stats",
+                "detectors_info": "GET /api/v1/detectors"
             },
             "system": {
                 "health": "GET /api/v1/health",
@@ -577,28 +715,25 @@ async def get_api_info():
             "pro": {"requests_per_minute": 300, "requests_per_day": 50000},
             "enterprise": {"requests_per_minute": 1000, "requests_per_day": 1000000}
         },
+        "performance": {
+            "target_response_time_ms": 200,
+            "max_throughput_rps": 1000,
+            "timeout_limit_ms": 2000,
+            "batch_limit": 100
+        },
+        "languages": {
+            "primary": "Russian (ru)",
+            "secondary": "English (en)", 
+            "supported": ["ru", "en", "mixed"]
+        },
         "documentation": {
             "interactive": "/docs",
             "openapi_schema": "/openapi.json",
-            "sdk": {
-                "python": "pip install antispam-client",
-                "javascript": "npm install @antispam/client"
-            }
-        },
-        "support": {
-            "email": "support@antispam.com",
-            "documentation": "https://docs.antispam.com",
-            "status_page": "https://status.antispam.com"
-        },
-        "performance": {
-            "avg_response_time_ms": 200,
-            "max_throughput_rps": 1000,
-            "uptime_guarantee": "99.9%"
+            "python_sdk": "pip install antispam-client"
         },
         "generated_at": datetime.utcnow().isoformat()
     }
 
 
-# === IMPORT ASYNCIO FOR BACKGROUND TASKS ===
+# === IMPORT REQUIREMENTS ===
 import asyncio
-from datetime import timedelta
