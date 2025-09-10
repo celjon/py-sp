@@ -132,7 +132,7 @@ class JWTService:
         Returns:
             TokenPair с access и refresh токенами
         """
-        now = datetime.utcnow()
+        now = datetime.now(datetime.UTC)
         
         # Access token (короткий срок жизни)
         access_expires = now + timedelta(minutes=self.access_token_expire_minutes)
@@ -177,7 +177,7 @@ class JWTService:
         permissions: list = None
     ) -> str:
         """Создает только access token"""
-        now = datetime.utcnow()
+        now = datetime.now(datetime.UTC)
         expires = now + timedelta(minutes=self.access_token_expire_minutes)
         
         claims = JWTClaims(
@@ -366,7 +366,7 @@ class JWTService:
                 "issued_at": datetime.fromtimestamp(claims.iat).isoformat(),
                 "expires_at": datetime.fromtimestamp(claims.exp).isoformat(),
                 "permissions": claims.permissions,
-                "is_expired": datetime.utcnow().timestamp() > claims.exp
+                "is_expired": datetime.now(datetime.UTC).timestamp() > claims.exp
             })
         
         return info

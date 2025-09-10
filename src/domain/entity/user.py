@@ -97,3 +97,13 @@ class User:
         if self.first_message_at is None:
             self.first_message_at = datetime.now()
 
+
+@dataclass
+class UserContext:
+    """Контекст пользователя для детекции спама"""
+    user_id: int
+    is_new_user: bool = False
+    is_admin_or_owner: bool = False
+    chat_id: Optional[int] = None
+    message_count: int = 0
+    spam_score: float = 0.0

@@ -59,7 +59,7 @@ class MessageRepository:
 
     async def get_user_recent_messages(self, user_id: int, chat_id: int, hours: int = 24) -> List[Message]:
         """Получить сообщения пользователя за последние N часов"""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(datetime.UTC) - timedelta(hours=hours)
         query = """
         SELECT * FROM messages 
         WHERE user_id = $1 AND chat_id = $2 AND created_at > $3
@@ -82,7 +82,7 @@ class MessageRepository:
 
     async def get_chat_stats(self, chat_id: int, hours: int = 24) -> Dict[str, Any]:
         """Получить статистику чата за указанный период"""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(datetime.UTC) - timedelta(hours=hours)
         
         # Основная статистика сообщений
         messages_query = """
@@ -181,7 +181,8 @@ class MessageRepository:
                         'hour': row['hour'].isoformat() if row['hour'] else None,
                         'total': row['total'],
                         'spam': row['spam'],
-                        'spam_rate': round((row['spam'] / row['total'] * 100) if row['total'] > 0 else 0, 1)
+                        'spam_rate': round((row['spam'] / row['total']) if row['total'] > 0 else 0.0, 3),
+                        'spam_percentage': round((row['spam'] / row['total'] * 100) if row['total'] > 0 else 0, 1)
                     }
                     for row in hourly_stats
                 ],
@@ -189,14 +190,14 @@ class MessageRepository:
                 # Метаданные
                 'period_hours': hours,
                 'period_start': since.isoformat(),
-                'generated_at': datetime.utcnow().isoformat()
+                'generated_at': datetime.now(datetime.UTC).isoformat()
             }
             
             return stats
 
     async def get_global_stats(self, hours: int = 24) -> Dict[str, Any]:
         """Получить глобальную статистику по всем чатам"""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(datetime.UTC) - timedelta(hours=hours)
         
         query = """
         SELECT 
@@ -226,12 +227,12 @@ class MessageRepository:
                 'spam_users': row['spam_users'] or 0,
                 'avg_spam_confidence': round(float(row['avg_spam_confidence'] or 0), 3),
                 'period_hours': hours,
-                'generated_at': datetime.utcnow().isoformat()
+                'generated_at': datetime.now(datetime.UTC).isoformat()
             }
 
     async def get_user_stats(self, user_id: int, chat_id: Optional[int] = None, hours: int = 168) -> Dict[str, Any]:
         """Получить статистику конкретного пользователя"""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(datetime.UTC) - timedelta(hours=hours)
         
         # Базовый запрос
         base_conditions = "user_id = $1 AND created_at > $2"
@@ -276,7 +277,7 @@ class MessageRepository:
                 'last_message': row['last_message'],
                 'period_hours': hours,
                 'is_suspicious': spam > 0 or float(row['avg_spam_confidence'] or 0) > 0.3,
-                'generated_at': datetime.utcnow().isoformat()
+                'generated_at': datetime.now(datetime.UTC).isoformat()
             }
 
     async def search_messages(
@@ -323,7 +324,7 @@ class MessageRepository:
         
         if hours is not None:
             param_count += 1
-            since = datetime.utcnow() - timedelta(hours=hours)
+            since = datetime.now(datetime.UTC) - timedelta(hours=hours)
             conditions.append(f"created_at > ${param_count}")
             params.append(since)
         

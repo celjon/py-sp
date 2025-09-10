@@ -67,7 +67,7 @@ class SpamSamplesRepository:
 
     async def get_recent_samples(self, hours: int = 24, limit: int = 100) -> List[SpamSample]:
         """Получить недавние образцы"""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(datetime.UTC) - timedelta(hours=hours)
         query = """
         SELECT * FROM spam_samples 
         WHERE created_at > $1 

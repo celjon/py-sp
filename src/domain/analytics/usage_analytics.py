@@ -204,7 +204,7 @@ class UsageAnalytics:
                 is_spam_detected=is_spam_detected,
                 detection_confidence=detection_confidence,
                 detection_reason=detection_reason,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(datetime.UTC)
             )
             
             # Сохраняем в БД
@@ -341,7 +341,7 @@ class UsageAnalytics:
             return UsageMetrics(
                 api_key_id=api_key_id,
                 period="realtime",
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(datetime.UTC)
             )
     
     async def get_billing_metrics(

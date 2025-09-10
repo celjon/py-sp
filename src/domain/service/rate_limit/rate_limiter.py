@@ -160,7 +160,7 @@ class RateLimiter:
                 return RateLimitResult(
                     is_allowed=True,
                     remaining_requests=1000,  # Большое число
-                    reset_time=datetime.utcnow() + timedelta(minutes=1),
+                    reset_time=datetime.now(datetime.UTC) + timedelta(minutes=1),
                     limit_type=RateLimitType.PER_MINUTE
                 )
             else:
@@ -168,7 +168,7 @@ class RateLimiter:
                 return RateLimitResult(
                     is_allowed=False,
                     remaining_requests=0,
-                    reset_time=datetime.utcnow() + timedelta(minutes=1),
+                    reset_time=datetime.now(datetime.UTC) + timedelta(minutes=1),
                     limit_type=RateLimitType.PER_MINUTE,
                     retry_after_seconds=60
                 )

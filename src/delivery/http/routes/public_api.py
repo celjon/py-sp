@@ -321,7 +321,7 @@ async def get_usage_stats(
         from ....domain.entity.client_usage import UsagePeriod
         from datetime import datetime, timedelta
         
-        start_time = datetime.utcnow() - timedelta(hours=hours)
+        start_time = datetime.now(datetime.UTC) - timedelta(hours=hours)
         usage_stats = await usage_repo.get_usage_stats(
             api_key_id=api_key.id,
             period=UsagePeriod.HOUR,
@@ -343,7 +343,7 @@ async def get_usage_stats(
             "hourly_breakdown": hourly_stats[:24],  # Последние 24 часа
             "top_endpoints": top_endpoints,
             "period_hours": hours,
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.now(datetime.UTC).isoformat()
         }
         
     except HTTPException:
