@@ -1,6 +1,6 @@
 from typing import Protocol, List, Optional, Dict, Any
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ...entity.api_key import ApiKey, ApiKeyStatus, ApiKeyPlan
 from ...entity.client_usage import ApiUsageStats, UsagePeriod
 
@@ -121,7 +121,7 @@ class ManageApiKeysUseCase:
         
         # Устанавливаем срок истечения
         if request.expires_in_days:
-            api_key.expires_at = datetime.now(datetime.UTC) + timedelta(days=request.expires_in_days)
+            api_key.expires_at = datetime.now(timezone.utc) + timedelta(days=request.expires_in_days)
         
         # Хешируем и сохраняем ключ
         api_key.set_key(raw_key)
@@ -238,7 +238,7 @@ class ManageApiKeysUseCase:
             raise ValueError("Can only activate suspended API keys")
         
         api_key.status = ApiKeyStatus.ACTIVE
-        api_key.updated_at = datetime.now(datetime.UTC)
+        api_key.updated_at = datetime.now(timezone.utc)
         
         updated_key = await self.api_key_repo.update_api_key(api_key)
         
@@ -264,7 +264,7 @@ class ManageApiKeysUseCase:
             return None
         
         # Получаем статистику
-        start_time = datetime.now(datetime.UTC) - timedelta(days=days)
+        start_time = datetime.now(timezone.utc) - timedelta(days=days)
         usage_stats = await self.usage_repo.get_usage_stats(
             api_key_id=api_key_id,
             period=period,
@@ -287,7 +287,7 @@ class ManageApiKeysUseCase:
         
         return {
             "api_keys": stats,
-            "timestamp": datetime.now(datetime.UTC).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     
     async def rotate_api_key(self, api_key_id: int) -> Optional[ApiKeyResponse]:
@@ -321,7 +321,7 @@ class ManageApiKeysUseCase:
         
         # Добавляем информацию о ротации в метаданные
         new_key_response.api_key.metadata["rotated_from"] = api_key_id
-        new_key_response.api_key.metadata["rotation_date"] = datetime.now(datetime.UTC).isoformat()
+        new_key_response.api_key.metadata["rotation_date"] = datetime.now(timezone.utc).isoformat()
         await self.api_key_repo.update_api_key(new_key_response.api_key)
         
         return new_key_response

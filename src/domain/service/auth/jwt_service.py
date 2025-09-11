@@ -7,7 +7,7 @@ Production-ready JWT Authentication Service
 import jwt
 import secrets
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -132,7 +132,7 @@ class JWTService:
         Returns:
             TokenPair с access и refresh токенами
         """
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         
         # Access token (короткий срок жизни)
         access_expires = now + timedelta(minutes=self.access_token_expire_minutes)
@@ -177,7 +177,7 @@ class JWTService:
         permissions: list = None
     ) -> str:
         """Создает только access token"""
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         expires = now + timedelta(minutes=self.access_token_expire_minutes)
         
         claims = JWTClaims(
@@ -366,7 +366,7 @@ class JWTService:
                 "issued_at": datetime.fromtimestamp(claims.iat).isoformat(),
                 "expires_at": datetime.fromtimestamp(claims.exp).isoformat(),
                 "permissions": claims.permissions,
-                "is_expired": datetime.now(datetime.UTC).timestamp() > claims.exp
+                "is_expired": datetime.now(timezone.utc).timestamp() > claims.exp
             })
         
         return info

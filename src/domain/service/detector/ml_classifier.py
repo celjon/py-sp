@@ -313,3 +313,4 @@ class MLClassifier:
             "model_path": str(self.model_path),
             "is_loaded": self.model is not None
         }
+

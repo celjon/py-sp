@@ -5,7 +5,7 @@ Production-ready Authentication Routes v2.0
 """
 
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Request, Depends, status, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -211,7 +211,7 @@ async def get_jwt_tokens(
         )
         
         # Обновляем last_used_at
-        api_key.last_used_at = datetime.utcnow()
+        api_key.last_used_at = datetime.now(timezone.utc)
         await api_key_repo.update_api_key(api_key)
         
         # Записываем успешную аутентификацию
@@ -569,7 +569,7 @@ async def get_analytics_overview(
         return {
             "overview": global_stats,
             "period_hours": hours,
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -619,7 +619,7 @@ async def get_key_analytics(
                 "avg_success_rate": sum(m.success_rate for m in metrics) / len(metrics) if metrics else 0,
                 "anomalies_count": len(anomalies)
             },
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:

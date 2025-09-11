@@ -121,3 +121,4 @@ class DetectionResult:
             f"⚡ Time: {self.processing_time_ms:.1f}ms"
         )
 
+

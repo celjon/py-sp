@@ -137,3 +137,4 @@ class AuthMiddleware(BaseMiddleware):
         """Проверяет, является ли пользователь администратором"""
         return user_id in self.admin_user_ids
 
+

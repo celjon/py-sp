@@ -78,3 +78,4 @@ async def callback_spam_details(callback: types.CallbackQuery, **kwargs):
 def register_handlers(dp):
     """Регистрация callback обработчиков"""
     dp.include_router(router)
+

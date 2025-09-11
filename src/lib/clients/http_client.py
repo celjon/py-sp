@@ -168,3 +168,4 @@ class HttpClient:
         """Поддержка async context manager"""
         await self.close()
 
+

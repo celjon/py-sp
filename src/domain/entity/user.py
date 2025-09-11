@@ -107,3 +107,4 @@ class UserContext:
     chat_id: Optional[int] = None
     message_count: int = 0
     spam_score: float = 0.0
+

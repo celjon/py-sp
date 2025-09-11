@@ -236,3 +236,4 @@ class TextProcessor:
         confidence += repeat_score * 0.1
         
         return min(confidence, 1.0)
+

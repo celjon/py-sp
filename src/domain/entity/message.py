@@ -73,3 +73,4 @@ class Message:
         self.is_spam = False
         self.spam_confidence = confidence
 
+

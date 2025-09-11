@@ -7,7 +7,7 @@ Production-ready Public API Routes v2.0 - РЕАЛЬНАЯ детекция сп
 import time
 import traceback
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Union
 from fastapi import APIRouter, HTTPException, Request, Depends, status, BackgroundTasks
 from pydantic import BaseModel, Field, validator
@@ -184,7 +184,7 @@ async def track_api_usage(
                 client_ip=client_info["ip"],
                 user_agent=client_info["user_agent"],
                 detection_reason=detection_reason,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc)
             )
             
             # Добавляем в background task
@@ -231,7 +231,7 @@ async def detect_spam(
             text=request_data.text,
             user_id=request_data.context.get("user_id") if request_data.context else None,
             chat_id=request_data.context.get("chat_id") if request_data.context else None,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         
         # Подготавливаем контекст пользователя
@@ -352,7 +352,7 @@ async def batch_detect_spam(
                     text=message_req.text,
                     user_id=message_req.context.get("user_id") if message_req.context else None,
                     chat_id=message_req.context.get("chat_id") if message_req.context else None,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.now(timezone.utc)
                 )
                 
                 # Подготавливаем контекст
@@ -525,7 +525,7 @@ async def get_usage_stats(
         
         # Получаем billing информацию
         try:
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(hours=hours)
             billing_metrics = await usage_analytics.get_billing_metrics(
                 api_key_id=api_key.id,
@@ -536,8 +536,8 @@ async def get_usage_stats(
             logger.error(f"Failed to get billing metrics: {e}")
             # Fallback billing
             billing_metrics = {
-                "period_start": (datetime.utcnow() - timedelta(hours=hours)).isoformat(),
-                "period_end": datetime.utcnow().isoformat(),
+                "period_start": (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(),
+                "period_end": datetime.now(timezone.utc).isoformat(),
                 "total_cost": 0.0,
                 "total_requests": 0
             }
@@ -558,7 +558,7 @@ async def get_usage_stats(
                 "reset_time": api_key.get_reset_time()
             },
             billing_period=billing_metrics,
-            generated_at=datetime.utcnow().isoformat()
+            generated_at=datetime.now(timezone.utc).isoformat()
         )
         
     except HTTPException:
@@ -615,7 +615,7 @@ async def get_detectors_info(
                 "Performance monitoring"
             ],
             "languages_supported": ["ru", "en", "mixed"],
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -731,7 +731,7 @@ async def get_api_info():
             "openapi_schema": "/openapi.json",
             "python_sdk": "pip install antispam-client"
         },
-        "generated_at": datetime.utcnow().isoformat()
+        "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
 

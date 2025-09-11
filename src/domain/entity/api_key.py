@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional, Dict, Any
 import secrets
@@ -57,9 +57,9 @@ class ApiKey:
     def __post_init__(self):
         """Автоматическая генерация временных меток"""
         if self.created_at is None:
-            self.created_at = datetime.now(datetime.UTC)
+            self.created_at = datetime.now(timezone.utc)
         if self.updated_at is None:
-            self.updated_at = datetime.now(datetime.UTC)
+            self.updated_at = datetime.now(timezone.utc)
         
         # Устанавливаем дефолтное время истечения (1 год для FREE)
         if self.expires_at is None:
@@ -96,7 +96,7 @@ class ApiKey:
         """Проверяет, истек ли ключ"""
         if not self.expires_at:
             return False
-        return datetime.now(datetime.UTC) > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     @property
     def is_valid(self) -> bool:
@@ -109,13 +109,13 @@ class ApiKey:
     
     def update_last_used(self):
         """Обновляет время последнего использования"""
-        self.last_used_at = datetime.now(datetime.UTC)
-        self.updated_at = datetime.now(datetime.UTC)
+        self.last_used_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
     
     def suspend(self, reason: str = None):
         """Приостанавливает ключ"""
         self.status = ApiKeyStatus.SUSPENDED
-        self.updated_at = datetime.now(datetime.UTC)
+        self.updated_at = datetime.now(timezone.utc)
         if reason:
             self.metadata["suspension_reason"] = reason
     
@@ -123,7 +123,7 @@ class ApiKey:
         """Отзывает ключ"""
         self.status = ApiKeyStatus.REVOKED
         self.is_active = False
-        self.updated_at = datetime.now(datetime.UTC)
+        self.updated_at = datetime.now(timezone.utc)
         if reason:
             self.metadata["revocation_reason"] = reason
     

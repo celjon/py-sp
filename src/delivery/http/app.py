@@ -8,7 +8,8 @@ from typing import Dict, Any, Optional
 import asyncio
 
 from ...config.config import load_config
-from .routes import public_api, auth, admin, stats
+from .routes import auth_v2 as auth, admin, stats  
+from .routes import public_api_v2 as public_api
 from .middlewares.rate_limit import RateLimitMiddleware
 from .middlewares.api_auth import ApiAuthMiddleware
 

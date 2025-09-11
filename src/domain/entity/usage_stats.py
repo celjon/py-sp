@@ -52,3 +52,5 @@ class UsageStats:
             error_message=data.get("error_message"),
             detection_confidence=data.get("detection_confidence")
         )
+
+

@@ -7,7 +7,7 @@ Production Error Handler with Graceful Degradation
 import traceback
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Callable, List, Union
 from dataclasses import dataclass, field
 from enum import Enum
@@ -166,7 +166,7 @@ class ProductionErrorHandler:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={
                     "error": "Internal server error",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "error_id": "fallback_error"
                 }
             )
@@ -185,7 +185,7 @@ class ProductionErrorHandler:
         
         context = ErrorContext(
             error_id=error_id,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             severity=severity,
             category=category,
             service_name=self.service_name
@@ -330,7 +330,7 @@ class ProductionErrorHandler:
             response_data["retry_info"] = {
                 "retryable": True,
                 "suggested_delay_seconds": 60,
-                "rate_limit_reset": (datetime.utcnow() + timedelta(minutes=1)).isoformat()
+                "rate_limit_reset": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
             }
         
         return JSONResponse(
@@ -380,7 +380,7 @@ class ProductionErrorHandler:
         if breaker.state == "OPEN":
             # Проверяем, можно ли попробовать снова
             if breaker.last_failure_time:
-                time_since_failure = datetime.utcnow() - breaker.last_failure_time
+                time_since_failure = datetime.now(timezone.utc) - breaker.last_failure_time
                 if time_since_failure.total_seconds() > self.circuit_breaker_timeout:
                     breaker.state = "HALF_OPEN"
                     breaker.success_count = 0
@@ -411,7 +411,7 @@ class ProductionErrorHandler:
         
         breaker = self.get_circuit_breaker(service_name)
         breaker.failure_count += 1
-        breaker.last_failure_time = datetime.utcnow()
+        breaker.last_failure_time = datetime.now(timezone.utc)
         
         if breaker.failure_count >= self.circuit_breaker_threshold:
             breaker.state = "OPEN"
@@ -491,7 +491,7 @@ class ProductionErrorHandler:
     
     def get_error_summary(self, hours: int = 24) -> Dict[str, Any]:
         """Возвращает сводку ошибок за период"""
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         recent_errors = [
             error for error in self.error_cache
@@ -526,7 +526,7 @@ class ProductionErrorHandler:
         try:
             recent_errors = len([
                 error for error in self.error_cache
-                if error.timestamp > datetime.utcnow() - timedelta(minutes=5)
+                if error.timestamp > datetime.now(timezone.utc) - timedelta(minutes=5)
             ])
             
             # Определяем здоровье на основе недавних ошибок

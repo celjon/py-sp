@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
 import time
@@ -43,7 +43,7 @@ class ApiUsageRecord:
     detection_reason: Optional[str] = None
     
     # Временные метки
-    timestamp: datetime = field(default_factory=lambda: datetime.now(datetime.UTC))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     # Системные поля
     id: Optional[int] = None
@@ -92,8 +92,8 @@ class ApiUsageStats:
     total_data_processed_bytes: int = 0
     
     # Временные метки
-    created_at: datetime = field(default_factory=lambda: datetime.now(datetime.UTC))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(datetime.UTC))
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     # Системные поля
     id: Optional[int] = None
@@ -128,7 +128,7 @@ class ApiUsageStats:
     def update_stats(self, usage_record: ApiUsageRecord):
         """Обновляет статистику новой записью"""
         self.total_requests += 1
-        self.updated_at = datetime.now(datetime.UTC)
+        self.updated_at = datetime.now(timezone.utc)
         
         # Обновляем статистику по статусу
         if usage_record.status == RequestStatus.SUCCESS:
@@ -206,17 +206,17 @@ class RateLimitStatus:
     requests_this_month: int = 0
     
     # Окна времени
-    minute_window_start: datetime = field(default_factory=lambda: datetime.now(datetime.UTC).replace(second=0, microsecond=0))
-    hour_window_start: datetime = field(default_factory=lambda: datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0))
-    day_window_start: datetime = field(default_factory=lambda: datetime.now(datetime.UTC).replace(hour=0, minute=0, second=0, microsecond=0))
-    month_window_start: datetime = field(default_factory=lambda: datetime.now(datetime.UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0))
+    minute_window_start: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(second=0, microsecond=0))
+    hour_window_start: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0))
+    day_window_start: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0))
+    month_window_start: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0))
     
     # Последний запрос
     last_request_time: Optional[datetime] = None
     
     def reset_if_needed(self):
         """Сбрасывает счетчики если прошло соответствующее время"""
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         
         # Проверяем минутное окно
         current_minute = now.replace(second=0, microsecond=0)
@@ -250,7 +250,7 @@ class RateLimitStatus:
         self.requests_this_hour += 1
         self.requests_this_day += 1
         self.requests_this_month += 1
-        self.last_request_time = datetime.now(datetime.UTC)
+        self.last_request_time = datetime.now(timezone.utc)
     
     def check_limits(self, rate_limits: Dict[str, int]) -> Optional[str]:
         """

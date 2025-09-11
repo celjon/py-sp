@@ -82,3 +82,4 @@ class SpamSample:
     def __str__(self) -> str:
         """Строковое представление"""
         return f"SpamSample({self.type.value}, {self.source.value}, '{self.text[:50]}...')"
+

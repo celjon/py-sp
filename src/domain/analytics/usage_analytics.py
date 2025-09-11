@@ -6,7 +6,7 @@ Production-ready Usage Analytics Service
 
 import time
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -204,7 +204,7 @@ class UsageAnalytics:
                 is_spam_detected=is_spam_detected,
                 detection_confidence=detection_confidence,
                 detection_reason=detection_reason,
-                timestamp=datetime.now(datetime.UTC)
+                timestamp=datetime.now(timezone.utc)
             )
             
             # Сохраняем в БД
@@ -241,7 +241,7 @@ class UsageAnalytics:
             Список метрик по периодам
         """
         try:
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(hours=hours_back)
             
             # Получаем агрегированные данные из БД
@@ -304,7 +304,7 @@ class UsageAnalytics:
                 return cached_metric
             
             # Получаем из БД
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(minutes=last_minutes)
             
             raw_data = await self.usage_repo.get_usage_stats(
@@ -341,7 +341,7 @@ class UsageAnalytics:
             return UsageMetrics(
                 api_key_id=api_key_id,
                 period="realtime",
-                timestamp=datetime.now(datetime.UTC)
+                timestamp=datetime.now(timezone.utc)
             )
     
     async def get_billing_metrics(
@@ -410,7 +410,7 @@ class UsageAnalytics:
                 },
                 "daily_breakdown": [metric.to_dict() for metric in daily_metrics],
                 "top_endpoints": top_endpoints[:10],  # Топ 10
-                "generated_at": datetime.utcnow().isoformat()
+                "generated_at": datetime.now(timezone.utc).isoformat()
             }
             
             return billing_data
@@ -517,7 +517,7 @@ class UsageAnalytics:
             global_stats = await self.usage_repo.get_global_usage_stats(hours_back)
             
             # Добавляем дополнительную аналитику
-            end_time = datetime.utcnow()
+            end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(hours=hours_back)
             
             return {
@@ -533,7 +533,7 @@ class UsageAnalytics:
                     "real_time_enabled": self.enable_real_time,
                     "alert_rules_count": len(self._alert_rules)
                 },
-                "generated_at": datetime.utcnow().isoformat()
+                "generated_at": datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
@@ -606,7 +606,7 @@ class UsageAnalytics:
                 "metric": rule.metric,
                 "threshold": rule.threshold,
                 "current_value": getattr(metrics, rule.metric, 0),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "severity": "high" if rule.metric in ["error_rate", "response_time"] else "medium"
             }
             
@@ -650,7 +650,7 @@ class UsageAnalytics:
     
     def _is_cache_valid(self, timestamp: datetime) -> bool:
         """Проверяет валидность кэша"""
-        return (datetime.utcnow() - timestamp).total_seconds() < self._cache_ttl
+        return (datetime.now(timezone.utc) - timestamp).total_seconds() < self._cache_ttl
     
     def health_check(self) -> Dict[str, Any]:
         """Health check для analytics сервиса"""

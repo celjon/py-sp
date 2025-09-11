@@ -3,7 +3,7 @@
 """
 from typing import List, Optional
 import asyncpg
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ...domain.entity.spam_sample import SpamSample, SampleType, SampleSource
 from ...lib.clients.postgres_client import PostgresClient
 
@@ -67,7 +67,7 @@ class SpamSamplesRepository:
 
     async def get_recent_samples(self, hours: int = 24, limit: int = 100) -> List[SpamSample]:
         """Получить недавние образцы"""
-        since = datetime.now(datetime.UTC) - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         query = """
         SELECT * FROM spam_samples 
         WHERE created_at > $1 
@@ -127,3 +127,4 @@ class SpamSamplesRepository:
             created_at=row['created_at'],
             updated_at=row['updated_at']
         )
+

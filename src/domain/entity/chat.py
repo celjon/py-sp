@@ -61,3 +61,4 @@ class Chat:
         else:
             raise ValueError("Spam threshold must be between 0.0 and 1.0")
 
+

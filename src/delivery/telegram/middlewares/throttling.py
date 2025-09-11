@@ -64,3 +64,4 @@ class ThrottlingMiddleware(BaseMiddleware):
         # Продолжаем обработку
         return await handler(event, data)
 
+

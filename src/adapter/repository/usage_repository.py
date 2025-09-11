@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict, Any
 import asyncpg
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ...domain.entity.client_usage import (
     ApiUsageRecord, ApiUsageStats, RateLimitStatus, 
     UsagePeriod, RequestStatus
@@ -46,7 +46,7 @@ class UsageRepository:
 
     async def get_rate_limit_status(self, api_key_id: int) -> RateLimitStatus:
         """Получить текущий статус rate limiting для ключа"""
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         
         # Запросы для разных временных окон
         queries = {
@@ -106,7 +106,7 @@ class UsageRepository:
         """Получить агрегированную статистику использования"""
         
         if end_time is None:
-            end_time = datetime.now(datetime.UTC)
+            end_time = datetime.now(timezone.utc)
         
         query = """
         SELECT 
@@ -157,7 +157,7 @@ class UsageRepository:
         days: int = 7
     ) -> List[Dict[str, Any]]:
         """Получить почасовую статистику за последние N дней"""
-        start_time = datetime.now(datetime.UTC) - timedelta(days=days)
+        start_time = datetime.now(timezone.utc) - timedelta(days=days)
         
         query = """
         SELECT 
@@ -203,7 +203,7 @@ class UsageRepository:
         limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Получить топ endpoints по использованию"""
-        start_time = datetime.now(datetime.UTC) - timedelta(hours=hours)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         query = """
         SELECT 
@@ -240,7 +240,7 @@ class UsageRepository:
 
     async def get_global_usage_stats(self, hours: int = 24) -> Dict[str, Any]:
         """Получить глобальную статистику использования API"""
-        start_time = datetime.now(datetime.UTC) - timedelta(hours=hours)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         query = """
         SELECT 
@@ -291,12 +291,12 @@ class UsageRepository:
                 "avg_processing_time_ms": round(float(row['avg_processing_time'] or 0), 2),
                 "total_data_processed_mb": round((row['total_data_processed'] or 0) / 1024 / 1024, 2),
                 "period_hours": hours,
-                "generated_at": datetime.now(datetime.UTC).isoformat()
+                "generated_at": datetime.now(timezone.utc).isoformat()
             }
 
     async def cleanup_old_usage_records(self, days_to_keep: int = 90) -> int:
         """Очистить старые записи использования (для экономии места)"""
-        cutoff_date = datetime.now(datetime.UTC) - timedelta(days=days_to_keep)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
         
         query = """
         DELETE FROM api_usage_records 
@@ -316,7 +316,7 @@ class UsageRepository:
         limit: int = 20
     ) -> List[Dict[str, Any]]:
         """Получить статистику по IP адресам клиента"""
-        start_time = datetime.now(datetime.UTC) - timedelta(hours=hours)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         query = """
         SELECT 

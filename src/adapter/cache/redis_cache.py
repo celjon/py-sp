@@ -187,3 +187,4 @@ class RedisCache:
         except Exception as e:
             print(f"Error clearing pattern {pattern} from Redis: {e}")
             return 0
+

@@ -85,3 +85,4 @@ class CheckMessageUseCase:
     def _ema(self, current_value: float, new_value: float, alpha: float) -> float:
         return current_value * (1 - alpha) + new_value * alpha
 
+
