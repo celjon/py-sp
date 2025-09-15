@@ -44,13 +44,6 @@ openai:
   max_tokens: 100               # Меньше токенов = быстрее
   temperature: 0.0
   enabled: true
-  system_prompt: |
-    Ты эксперт по определению спама. Анализируй быстро и точно.
-    
-    СПАМ: реклама, "заработок", финансовые схемы, массовые рассылки.
-    НЕ СПАМ: обычное общение, вопросы, обмен опытом.
-    
-    Ответ JSON: {"is_spam": boolean, "confidence": float, "reason": "краткое объяснение"}
 
 # Внешние API production
 external_apis:

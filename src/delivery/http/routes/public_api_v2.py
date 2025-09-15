@@ -9,12 +9,12 @@ import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Union
-from fastapi import APIRouter, HTTPException, Request, Depends, status, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, Depends, status, BackgroundTasks, Query
 from pydantic import BaseModel, Field, validator
 import logging
 
 from ....config.dependencies import get_dependencies_for_routes
-from ....domain.service.analytics.usage_analytics import UsageAnalytics
+from ....domain.analytics.usage_analytics import UsageAnalytics
 from ....domain.usecase.spam_detection.check_message import CheckMessageUseCase
 from ....domain.entity.message import Message
 from ....domain.entity.client_usage import RequestStatus, ApiUsageRecord
@@ -501,7 +501,7 @@ async def batch_detect_spam(
 )
 async def get_usage_stats(
     request: Request,
-    hours: int = Field(24, ge=1, le=168, description="Период в часах"),
+    hours: int = Query(24, ge=1, le=168, description="Период в часах"),
     usage_analytics: UsageAnalytics = Depends(deps["get_usage_analytics"])
 ):
     """Статистика использования API для клиента"""

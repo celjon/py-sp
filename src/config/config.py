@@ -247,10 +247,10 @@ def _create_default_config() -> Config:
     """Создать конфигурацию по умолчанию из переменных окружения"""
     return Config(
         database=DatabaseConfig(
-            url=os.getenv("DATABASE_URL", "postgresql://antispam:password@localhost:5432/antispam_bot")
+            url=os.getenv("DATABASE_URL")
         ),
         redis=RedisConfig(
-            url=os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            url=os.getenv("REDIS_URL")
         ),
         telegram=TelegramConfig(
             token=os.getenv("BOT_TOKEN", ""),
@@ -278,7 +278,7 @@ def _create_default_config() -> Config:
         ),
         external_apis={
             "cas": {
-                "api_url": "https://api.cas.chat/check",
+                "api_url": os.getenv("CAS_API_URL"),
                 "timeout": 5,
                 "cache_ttl": 3600
             }

@@ -43,6 +43,14 @@ class AntiSpamBot:
         """Запуск бота в режиме polling"""
         try:
             print("Starting bot...")
+            
+            # Удаляем webhook если он активен
+            try:
+                await self.bot.delete_webhook(drop_pending_updates=True)
+                print("✅ Webhook удален")
+            except Exception as e:
+                print(f"⚠️ Ошибка при удалении webhook: {e}")
+            
             await self.dp.start_polling(self.bot, skip_updates=True)
         finally:
             await self.bot.session.close()

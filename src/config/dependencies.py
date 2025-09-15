@@ -7,14 +7,16 @@ Production-ready Dependency Injection Setup
 import os
 import asyncio
 import logging
+import time
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
+from fastapi import HTTPException
 
 # Core imports - добавлены отсутствующие imports
 from ..domain.service.auth.jwt_service import JWTService, create_jwt_service
 from ..domain.service.rate_limit.rate_limiter import RateLimiter, create_rate_limiter
-from ..domain.service.analytics.usage_analytics import UsageAnalytics, create_usage_analytics
-from ..delivery.http.middleware.api_auth import ApiAuthMiddleware, create_api_auth_middleware
+from ..domain.analytics.usage_analytics import UsageAnalytics, create_usage_analytics
+# Middleware импорты перенесены в app.py чтобы избежать циклических импортов
 
 # Repositories
 from ..adapter.repository.api_key_repository import ApiKeyRepository
@@ -26,10 +28,9 @@ from ..adapter.repository.spam_samples_repository import SpamSamplesRepository
 # Use Cases
 from ..domain.usecase.api.manage_keys import ManageApiKeysUseCase
 from ..domain.usecase.spam_detection.check_message import CheckMessageUseCase
-from ..domain.usecase.admin.ban_user import BanUserUseCase
+from ..domain.usecase.spam_detection.ban_user import BanUserUseCase
 
 # Infrastructure
-from ..lib.clients.redis_client import RedisClient
 from ..lib.clients.postgres_client import PostgresClient
 from ..lib.clients.http_client import HttpClient
 
@@ -39,7 +40,7 @@ from ..adapter.gateway.openai_gateway import OpenAIGateway
 
 # Domain Services
 from ..domain.service.detector.ensemble import EnsembleDetector
-from ..domain.service.cache.redis_cache import RedisCache
+from ..adapter.cache.redis_cache import RedisCache
 from ..domain.service.monitoring.prometheus_metrics import create_prometheus_metrics
 
 # Entities
@@ -54,7 +55,6 @@ class ProductionServices:
     # Authentication & Authorization
     jwt_service: JWTService
     rate_limiter: RateLimiter
-    api_auth_middleware: Any  # Factory function
     
     # Analytics & Monitoring
     usage_analytics: UsageAnalytics
@@ -81,10 +81,10 @@ class ProductionServices:
     
     # Infrastructure
     postgres_client: PostgresClient
-    redis_client: Optional[RedisClient]
+    redis_client: Optional[Any]
     http_client: HttpClient
     
-    def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> Dict[str, Any]:
         """Комплексная проверка здоровья всей системы"""
         try:
             health_info = {
@@ -96,26 +96,42 @@ class ProductionServices:
             
             # JWT Service
             try:
-                health_info["services"]["jwt_service"] = self.jwt_service.health_check()
+                jwt_health = self.jwt_service.health_check()
+                if asyncio.iscoroutine(jwt_health):
+                    health_info["services"]["jwt_service"] = await jwt_health
+                else:
+                    health_info["services"]["jwt_service"] = jwt_health
             except Exception as e:
                 health_info["services"]["jwt_service"] = {"status": "error", "error": str(e)}
             
             # Rate Limiter
             try:
-                health_info["services"]["rate_limiter"] = self.rate_limiter.health_check()
+                rate_health = self.rate_limiter.health_check()
+                if asyncio.iscoroutine(rate_health):
+                    health_info["services"]["rate_limiter"] = await rate_health
+                else:
+                    health_info["services"]["rate_limiter"] = rate_health
             except Exception as e:
                 health_info["services"]["rate_limiter"] = {"status": "error", "error": str(e)}
             
             # Usage Analytics
             try:
-                health_info["services"]["usage_analytics"] = self.usage_analytics.health_check()
+                usage_health = self.usage_analytics.health_check()
+                if asyncio.iscoroutine(usage_health):
+                    health_info["services"]["usage_analytics"] = await usage_health
+                else:
+                    health_info["services"]["usage_analytics"] = usage_health
             except Exception as e:
                 health_info["services"]["usage_analytics"] = {"status": "error", "error": str(e)}
             
             # Database
             try:
                 if hasattr(self.postgres_client, 'health_check'):
-                    health_info["services"]["postgres"] = self.postgres_client.health_check()
+                    db_health = self.postgres_client.health_check()
+                    if asyncio.iscoroutine(db_health):
+                        health_info["services"]["postgres"] = await db_health
+                    else:
+                        health_info["services"]["postgres"] = db_health
                 else:
                     health_info["services"]["postgres"] = {"status": "unknown", "method": "not_implemented"}
             except Exception as e:
@@ -124,7 +140,11 @@ class ProductionServices:
             # Redis
             try:
                 if self.redis_client and hasattr(self.redis_client, 'health_check'):
-                    health_info["services"]["redis"] = self.redis_client.health_check()
+                    redis_health = self.redis_client.health_check()
+                    if asyncio.iscoroutine(redis_health):
+                        health_info["services"]["redis"] = await redis_health
+                    else:
+                        health_info["services"]["redis"] = redis_health
                 else:
                     health_info["services"]["redis"] = {"status": "not_configured"}
             except Exception as e:
@@ -196,7 +216,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     # === INFRASTRUCTURE CLIENTS ===
     logger.info("📦 Настройка клиентов инфраструктуры...")
     
-    # PostgreSQL Client (КРИТИЧЕСКИЙ)
+    # Database Client (КРИТИЧЕСКИЙ)
     postgres_client = None
     try:
         database_url = config.get("database_url") or config.get("database", {}).get("url")
@@ -207,16 +227,18 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         await postgres_client.connect()
         logger.info("✅ PostgreSQL подключен")
     except Exception as e:
-        critical_errors.append(f"PostgreSQL connection failed: {e}")
-        logger.error(f"❌ PostgreSQL ошибка: {e}")
+        critical_errors.append(f"Database connection failed: {e}")
+        logger.error(f"❌ Database ошибка: {e}")
     
     # Redis Client (НЕ критический)
     redis_client = None
     try:
         redis_url = config.get("redis_url") or config.get("redis", {}).get("url")
         if redis_url:
-            redis_client = RedisClient(redis_url)
-            await redis_client.connect()
+            # Используем RedisCache как клиент и источник redis соединения
+            redis_cache_client = RedisCache(redis_url)
+            await redis_cache_client.connect()
+            redis_client = redis_cache_client.redis  # raw redis connection
             logger.info("✅ Redis подключен")
         else:
             warnings.append("Redis не настроен - некоторые функции будут работать в fallback режиме")
@@ -227,8 +249,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     
     # HTTP Client
     http_client = HttpClient(
-        timeout=config.get("http_client", {}).get("timeout", 30),
-        max_retries=config.get("http_client", {}).get("max_retries", 3)
+        timeout=config.get("http_client", {}).get("timeout", 30)
     )
     logger.info("✅ HTTP клиент настроен")
     
@@ -256,7 +277,9 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     redis_cache = None
     if redis_client:
         try:
-            redis_cache = RedisCache(redis_client)
+            # Создаем отдельный RedisCache для кэш-слоя, повторно используя URL из конфигурации
+            redis_cache = RedisCache(config.get("redis_url") or config.get("redis", {}).get("url"))
+            await redis_cache.connect()
             logger.info("✅ Redis кэш настроен")
         except Exception as e:
             warnings.append(f"Redis cache initialization failed: {e}")
@@ -284,7 +307,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         openai_config = config.get("openai", {})
         if openai_config.get("api_key") and openai_config.get("enabled", True):
             openai_gateway = OpenAIGateway(
-                http_client=http_client,
+                api_key=openai_config["api_key"],
                 config=openai_config
             )
             logger.info("✅ OpenAI Gateway настроен")
@@ -361,15 +384,28 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         )
         
         check_message_usecase = CheckMessageUseCase(
-            detector=ensemble_detector,
+            spam_detector=ensemble_detector,
             message_repo=message_repo,
             user_repo=user_repo,
-            cache=redis_cache
+            spam_threshold=0.6
         )
+        
+        # Создаем Telegram Gateway
+        from ..adapter.gateway.telegram_gateway import TelegramGateway
+        from aiogram import Bot
+        from aiogram.client.default import DefaultBotProperties
+        from aiogram.enums import ParseMode
+        
+        bot = Bot(
+            token=config.get("bot_token"),
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
+        telegram_gateway = TelegramGateway(bot=bot)
         
         ban_user_usecase = BanUserUseCase(
             user_repo=user_repo,
-            message_repo=message_repo
+            message_repo=message_repo,
+            telegram_gateway=telegram_gateway
         )
         
         logger.info("✅ Use cases настроены")
@@ -380,12 +416,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     logger.info("🔒 Настройка middleware...")
     
     try:
-        api_auth_middleware_factory = create_api_auth_middleware(
-            jwt_service=jwt_service,
-            rate_limiter=rate_limiter,
-            api_key_repo=api_key_repo,
-            config=config.get("middleware", {})
-        )
+        # API Auth Middleware создается в app.py для избежания циклических импортов
         logger.info("✅ Middleware настроен")
     except Exception as e:
         raise RuntimeError(f"Middleware initialization failed: {e}")
@@ -396,7 +427,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
             # Authentication & Authorization
             jwt_service=jwt_service,
             rate_limiter=rate_limiter,
-            api_auth_middleware=api_auth_middleware_factory,
+            # api_auth_middleware создается в app.py
             
             # Analytics & Monitoring  
             usage_analytics=usage_analytics,
@@ -435,7 +466,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     logger.info("🔍 Проверка готовности системы...")
     
     try:
-        health = services.health_check()
+        health = await services.health_check()
         
         if health["status"] == "healthy":
             logger.info("✅ Все production сервисы готовы!")
@@ -489,8 +520,7 @@ def integrate_with_fastapi_app(app, services: ProductionServices, config: Dict[s
     # === MIDDLEWARE ===
     # Добавляем API Auth Middleware
     try:
-        # ВАЖНО: middleware добавляется через фабрику
-        middleware_instance = services.api_auth_middleware(app)
+        # Middleware добавляется в app.py
         logger.info("✅ API Auth Middleware добавлен")
     except Exception as e:
         logger.error(f"❌ Ошибка добавления middleware: {e}")
@@ -519,7 +549,7 @@ def integrate_with_fastapi_app(app, services: ProductionServices, config: Dict[s
         logger.info("📊 Production services активны")
         
         # Финальная проверка
-        health = services.health_check()
+        health = await services.health_check()
         if health["status"] not in ["healthy", "degraded"]:
             logger.error(f"❌ System не готова: {health}")
             raise RuntimeError("System health check failed on startup")
@@ -604,10 +634,16 @@ def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
     warnings = []
     
     # === ОБЯЗАТЕЛЬНЫЕ ПАРАМЕТРЫ ===
-    required_keys = [
-        "database_url",
-        "bot_token"
-    ]
+    environment = config.get("environment", os.getenv("ENVIRONMENT", "development"))
+    if environment == "testing":
+        required_keys = [
+            "database_url"
+        ]
+    else:
+        required_keys = [
+            "database_url",
+            "bot_token"
+        ]
     
     for key in required_keys:
         value = config.get(key)
@@ -631,7 +667,6 @@ def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
         errors.append("JWT_SECRET должен быть минимум 32 символа")
     
     # === SECURITY VALIDATION ===
-    environment = config.get("environment", os.getenv("ENVIRONMENT", "development"))
     
     if environment == "production":
         # Production-specific validations
@@ -711,18 +746,21 @@ async def create_default_api_key_if_needed(services: ProductionServices):
         if not existing_keys:
             logger.info("🔑 Создание дефолтного API ключа...")
             
-            # Создаем API ключ
-            api_key = ApiKey.create_new(
-                name="default-production-key",
-                plan=ApiKeyPlan.BASIC,
-                description="Auto-generated default API key for production"
+            # Используем use case для создания ключа (как и должно быть в clean architecture)
+            from src.domain.usecase.api.manage_keys import CreateApiKeyRequest
+            
+            create_request = CreateApiKeyRequest(
+                client_name="default-production-key",
+                contact_email="admin@antispam-bot.local",
+                plan=ApiKeyPlan.FREE
             )
             
-            # Сохраняем в базе
-            await services.api_key_repo.create(api_key)
+            # Создаем через use case
+            result = await services.manage_api_keys_usecase.create_api_key(create_request)
             
-            logger.info(f"✅ Дефолтный API ключ создан: {api_key.key[:8]}...")
+            logger.info(f"✅ Дефолтный API ключ создан: {result.raw_key[:16]}...")
             logger.info("🔐 ВАЖНО: Сохраните этот ключ в безопасном месте!")
+            logger.info(f"🔑 Полный ключ: {result.raw_key}")
             
     except Exception as e:
         logger.warning(f"⚠️ Не удалось создать дефолтный API ключ: {e}")
@@ -735,8 +773,8 @@ async def example_production_setup():
     
     # Загружаем конфигурацию
     config = {
-        "database_url": os.getenv("DATABASE_URL", "postgresql://antispam_user:StrongPassword123!@localhost:5432/antispam_bot"),
-        "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+        "database_url": os.getenv("DATABASE_URL"),
+        "redis_url": os.getenv("REDIS_URL"),
         "bot_token": os.getenv("BOT_TOKEN"),
         "environment": os.getenv("ENVIRONMENT", "production"),
         "api": {
@@ -808,3 +846,148 @@ async def example_production_setup():
 if __name__ == "__main__":
     # Тест настройки
     asyncio.run(example_production_setup())
+
+
+# === TESTING SUPPORT (production-backed) ===
+
+def setup_test_dependencies_mock(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Создает полностью мокнутые зависимости для интеграционных тестов
+    Не требует реальных соединений с БД/Redis
+    """
+    from unittest.mock import Mock, AsyncMock
+    from src.domain.entity.api_key import ApiKey, ApiKeyPlan
+    from src.domain.service.auth.jwt_service import JWTService
+    
+    # Создаем полностью мокнутые зависимости
+    mock_postgres_client = Mock()
+    mock_redis_client = Mock()
+    mock_http_client = Mock()
+    
+    # API Key Repository
+    mock_api_key_repo = Mock()
+    
+    # Создаем правильный мокнутый API ключ с корректным хешем
+    test_api_key_str = "antispam_test_api_key_for_integration_tests_123456789"
+    test_api_key = ApiKey(
+        id="test_key_id",
+        key_hash=ApiKey.hash_key(test_api_key_str),  # Правильный хеш
+        client_name="Test Client",
+        contact_email="test@example.com",
+        plan=ApiKeyPlan.FREE,
+        is_active=True
+    )
+    
+    # Мокаем методы репозитория
+    mock_api_key_repo.verify_key = AsyncMock(return_value=test_api_key)
+    mock_api_key_repo.get_api_key_by_hash = AsyncMock(return_value=test_api_key)
+    
+    # JWT Service (реальный, так как не требует внешних соединений)
+    jwt_config = config.get("api", {}).get("auth", {})
+    jwt_service = JWTService(
+        secret_key=jwt_config.get("jwt_secret", "test_jwt_secret_32_chars_minimum"),
+        algorithm="HS256",
+        access_token_expire_minutes=30
+    )
+    
+    # Rate Limiter
+    mock_rate_limiter = Mock()
+    mock_rate_limiter.check_rate_limit = AsyncMock(return_value=True)
+    
+    # Spam Detection Services
+    mock_ensemble_detector = Mock()
+    mock_ensemble_detector.detect = AsyncMock(return_value={
+        "is_spam": False,
+        "confidence": 0.2,
+        "detectors_used": ["cas", "ruspam"],
+        "details": {"cas": {"is_banned": False}, "ruspam": {"confidence": 0.2}}
+    })
+    
+    # Usage Repository
+    mock_usage_repo = Mock()
+    mock_usage_repo.record_usage = AsyncMock()
+    
+    # Use Cases
+    mock_check_message_usecase = Mock()
+    mock_check_message_usecase.execute = AsyncMock(return_value={
+        "is_spam": False,
+        "confidence": 0.2,
+        "reason": "Normal message",
+        "action": "allow",
+        "processing_time_ms": 150.0
+    })
+    
+    mock_manage_api_keys_usecase = Mock()
+    mock_manage_api_keys_usecase.create_api_key = AsyncMock()
+    
+    # Notification Service
+    mock_notification_service = Mock()
+    mock_notification_service.send_notification = AsyncMock()
+    
+    return {
+        "postgres_client": mock_postgres_client,
+        "redis_client": mock_redis_client,
+        "http_client": mock_http_client,
+        "api_key_repo": mock_api_key_repo,  # Правильное имя для ProductionServices
+        "api_key_repository": mock_api_key_repo,  # Альтернативное имя
+        "jwt_service": jwt_service,
+        "rate_limiter": mock_rate_limiter,
+        "ensemble_detector": mock_ensemble_detector,
+        "usage_analytics": mock_usage_repo,  # Правильное имя для ProductionServices
+        "usage_repository": mock_usage_repo,  # Альтернативное имя
+        "check_message_usecase": mock_check_message_usecase,
+        "manage_api_keys_usecase": mock_manage_api_keys_usecase,
+        "notification_service": mock_notification_service
+    }
+
+
+async def setup_test_dependencies(
+    config: Dict[str, Any],
+    cas_gateway: Any = None,
+    ruspam_detector: Any = None,
+    openai_gateway: Any = None
+) -> Dict[str, Any]:
+    """Готовит реальные зависимости для интеграционных тестов на основе production-инициализации.
+
+    Никаких заглушек: поднимаются настоящие клиенты/репозитории/сервисы согласно конфигу.
+    """
+    validated = validate_production_config(config)
+    services = await setup_production_services(validated)
+
+    # Инъекция переданных тестом внешних зависимостей (без заглушек в коде)
+    detector = services.ensemble_detector
+    # CAS wrapper
+    if cas_gateway is not None:
+        class _CASWrapper:
+            def __init__(self, gw):
+                self._gw = gw
+            async def detect(self, message, user_context):
+                # ожидается интерфейс CASDetector.detect(message, ctx) → DetectorResult
+                return await cas_gateway.check_user(message, user_context)
+        detector.cas_detector = _CASWrapper(cas_gateway)
+
+    # RUSpam wrapper
+    if ruspam_detector is not None:
+        detector.ruspam_detector = ruspam_detector
+
+    # OpenAI wrapper
+    if openai_gateway is not None:
+        class _OAWrapper:
+            def __init__(self, gw):
+                self._gw = gw
+            async def detect(self, message, user_context):
+                return await openai_gateway.analyze_text(message, user_context)
+        detector.openai_detector = _OAWrapper(openai_gateway)
+
+    return {
+        "jwt_service": services.jwt_service,
+        "rate_limiter": services.rate_limiter,
+        "api_key_repository": services.api_key_repo,
+        "message_repository": services.message_repo,
+        "user_repository": services.user_repo,
+        "usage_analytics": services.usage_analytics,
+        "spam_detector": services.ensemble_detector,
+        "check_message_usecase": services.check_message_usecase,
+    }
+
+

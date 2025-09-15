@@ -4,7 +4,7 @@ Production-ready JWT Authentication Service
 Обеспечивает безопасную аутентификацию с access/refresh токенами
 """
 
-import jwt
+from jose import jwt, JWTError, ExpiredSignatureError
 import secrets
 import hashlib
 from datetime import datetime, timedelta, timezone
@@ -240,12 +240,12 @@ class JWTService:
                 claims=claims
             )
             
-        except jwt.ExpiredSignatureError:
+        except ExpiredSignatureError:
             return TokenValidationResult(
                 is_valid=False,
                 error="Token has expired"
             )
-        except jwt.InvalidTokenError as e:
+        except JWTError as e:
             return TokenValidationResult(
                 is_valid=False,
                 error=f"Invalid token: {str(e)}"
@@ -419,7 +419,7 @@ def create_jwt_service(config: Dict[str, Any]) -> JWTService:
     auth_config = config.get("auth", {})
     
     return JWTService(
-        secret_key=auth_config.get("jwt_secret", ""),
+        secret_key=auth_config.get("jwt_secret") or "development_jwt_secret_32_chars_minimum_length_required",
         algorithm=auth_config.get("jwt_algorithm", "HS256"),
         access_token_expire_minutes=auth_config.get("access_token_expire_minutes", 30),
         refresh_token_expire_days=auth_config.get("refresh_token_expire_days", 7),

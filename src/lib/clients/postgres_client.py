@@ -70,8 +70,7 @@ class PostgresClient:
         self.query_timeout = query_timeout
         self.server_settings = server_settings or {
             "application_name": "antispam-api",
-            "jit": "off",  # Отключаем JIT для стабильности
-            "shared_preload_libraries": "pg_stat_statements"
+            "jit": "off"  # Отключаем JIT для стабильности
         }
         
         self.pool: Optional[asyncpg.Pool] = None

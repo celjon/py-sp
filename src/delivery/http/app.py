@@ -8,16 +8,17 @@ from typing import Dict, Any, Optional
 import asyncio
 
 from ...config.config import load_config
+from ...config.dependencies import integrate_with_fastapi_app, validate_production_config, setup_production_services
+import inspect
 from .routes import auth_v2 as auth, admin, stats  
 from .routes import public_api_v2 as public_api
-from .middlewares.rate_limit import RateLimitMiddleware
-from .middlewares.api_auth import ApiAuthMiddleware
+from .middleware.api_auth import ApiAuthMiddleware
 
 
-def create_app(dependencies: Dict[str, Any] = None) -> FastAPI:
+def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = None) -> FastAPI:
     """Создание FastAPI приложения с публичным API"""
     
-    config = load_config()
+    config = config or load_config()
     
     app = FastAPI(
         title="AntiSpam Bot API",
@@ -110,9 +111,12 @@ def create_app(dependencies: Dict[str, Any] = None) -> FastAPI:
     app.state.dependencies = dependencies or {}
     app.state.config = config
     
+    # Приводим конфиг к dict для универсального доступа
+    http_cfg = config.get("http_server", {}) if isinstance(config, dict) else (config.http_server or {})
+
     # Настройка CORS (только для development)
-    if config.http_server.get("cors_enabled", False):
-        allowed_origins = config.http_server.get("cors_origins", ["*"])
+    if http_cfg.get("cors_enabled", False):
+        allowed_origins = http_cfg.get("cors_origins", ["*"])
         app.add_middleware(
             CORSMiddleware,
             allow_origins=allowed_origins,
@@ -122,15 +126,33 @@ def create_app(dependencies: Dict[str, Any] = None) -> FastAPI:
         )
         print(f"🌐 CORS enabled for origins: {allowed_origins}")
     
-    # API Authentication middleware для публичных endpoints
-    api_key_repo = dependencies.get("api_key_repository") if dependencies else None
-    usage_repo = dependencies.get("usage_repository") if dependencies else None
+    # Если зависимости переданы корутиной, аккуратно разрешаем
+    if dependencies and inspect.iscoroutine(dependencies):
+        try:
+            dependencies = asyncio.run(dependencies)
+        except RuntimeError as e:
+            if "cannot reuse already awaited coroutine" in str(e):
+                # Зависимости уже await-нуты, используем как есть
+                pass
+            else:
+                # Если event loop уже запущен (например, под pytest-asyncio), создаем временный
+                loop = asyncio.new_event_loop()
+                try:
+                    dependencies = loop.run_until_complete(dependencies)
+                finally:
+                    loop.close()
+
+    # API Authentication middleware для публичных endpoints (если есть все зависимости)
+    jwt_service = dependencies.get("jwt_service") if isinstance(dependencies, dict) else None
+    rate_limiter = dependencies.get("rate_limiter") if isinstance(dependencies, dict) else None
+    api_key_repo = dependencies.get("api_key_repository") or dependencies.get("api_key_repo") if isinstance(dependencies, dict) else None
     
-    if api_key_repo and usage_repo:
+    if jwt_service and rate_limiter and api_key_repo:
         app.add_middleware(
             ApiAuthMiddleware,
+            jwt_service=jwt_service,
+            rate_limiter=rate_limiter,
             api_key_repo=api_key_repo,
-            usage_repo=usage_repo,
             protected_paths=[
                 "/api/v1/detect",
                 "/api/v1/detect/batch", 
@@ -139,10 +161,37 @@ def create_app(dependencies: Dict[str, Any] = None) -> FastAPI:
             ]
         )
         print("🔐 API Authentication middleware добавлен")
-    
-    # Rate limiting middleware
-    app.add_middleware(RateLimitMiddleware)
-    print("🚦 Rate limiting middleware добавлен")
+
+    # Добавляем зависимости в app state для доступа из routes
+    if isinstance(dependencies, dict):
+        # Создаем мок ProductionServices из словаря
+        from types import SimpleNamespace
+        services = SimpleNamespace()
+        for key, value in dependencies.items():
+            setattr(services, key, value)
+        app.state.production_services = services
+        print("📦 Зависимости добавлены в app state")
+
+    # Если зависимости не переданы - поднимем прод-сервисы и интегрируем
+    if not dependencies:
+        try:
+            cfg_dict = config if isinstance(config, dict) else {
+                "database_url": getattr(config, "database_url", None),
+                "redis_url": getattr(config, "redis_url", None),
+                "bot_token": getattr(config, "bot_token", None),
+                "api": {"auth": {"jwt_secret": getattr(config, "api", {}).auth.get("jwt_secret") if isinstance(getattr(config, "api", None), dict) else getattr(getattr(config, "api", None), "auth", {}).get("jwt_secret") if getattr(config, "api", None) else None}},
+                "spam_detection": {"ensemble": http_cfg.get("spam_detection", {}).get("ensemble", {})} if isinstance(config, dict) else {"ensemble": getattr(getattr(config, "spam_detection", None), "ensemble", {})},
+                "openai": getattr(config, "openai", {}) if isinstance(config, dict) else {
+                    "api_key": getattr(config, "openai_api_key", ""),
+                    "enabled": True
+                }
+            }
+            validated = validate_production_config(cfg_dict)
+            services = asyncio.run(setup_production_services(validated))
+            integrate_with_fastapi_app(app, services, validated)
+            print("🔌 Integrated production services into FastAPI app")
+        except Exception as e:
+            print(f"⚠️ Failed to auto-setup production services: {e}")
     
     # Включаем роутеры
     app.include_router(

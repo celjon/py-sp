@@ -8,7 +8,7 @@ class CASGateway:
     def __init__(self, http_client: HttpClient, cache: RedisCache, config: dict):
         self.http_client = http_client
         self.cache = cache
-        self.api_url = config.get("cas_api_url", "https://api.cas.chat")
+        self.api_url = config.get("api_url")
         self.timeout = config.get("timeout", 5)
         self.cache_ttl = config.get("cache_ttl", 3600)  # 1 час
 
@@ -87,6 +87,47 @@ class CASGateway:
         except Exception as e:
             print(f"CAS CSV export error: {e}")
             return None
+
+    async def health_check(self) -> dict:
+        """
+        Проверка здоровья CAS Gateway
+        
+        Returns:
+            dict: Статус здоровья системы
+        """
+        try:
+            # Проверяем доступность API с тестовым запросом
+            test_user_id = 304392973  # Тестовый ID
+            start_time = asyncio.get_event_loop().time()
+            
+            # Делаем тестовый запрос
+            is_banned = await self.check_cas(test_user_id)
+            
+            response_time = (asyncio.get_event_loop().time() - start_time) * 1000
+            
+            return {
+                "status": "healthy",
+                "api_available": True,
+                "response_time_ms": response_time,
+                "test_result": {"user_id": test_user_id, "is_banned": is_banned},
+                "config": {
+                    "api_url": self.api_url,
+                    "timeout": self.timeout,
+                    "cache_ttl": self.cache_ttl
+                }
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "api_available": False,
+                "error": str(e),
+                "config": {
+                    "api_url": self.api_url,
+                    "timeout": self.timeout,
+                    "cache_ttl": self.cache_ttl
+                }
+            }
 
 
 

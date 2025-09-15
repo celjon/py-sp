@@ -11,8 +11,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from ...entity.api_key import ApiKey
-from ...entity.client_usage import ApiUsageRecord, ApiUsageStats, RequestStatus
+from ..entity.api_key import ApiKey
+from ..entity.client_usage import ApiUsageRecord, ApiUsageStats, RequestStatus
 
 
 class AnalyticsEvent(Enum):

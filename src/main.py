@@ -9,6 +9,8 @@ import sys
 import asyncio
 import logging
 import signal
+import traceback
+import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 
@@ -22,7 +24,6 @@ from fastapi.staticfiles import StaticFiles
 from .config.config import load_config
 from .config.dependencies import (
     setup_production_services, 
-    integrate_with_fastapi_app,
     validate_production_config,
     ProductionServices
 )
@@ -44,8 +45,7 @@ from .domain.service.error_handling.error_handler import (
 )
 
 # Bot imports
-from .delivery.telegram.bot import TelegramBot
-from .delivery.telegram.handlers import setup_handlers
+from .delivery.telegram.bot import AntiSpamBot
 
 # Global state
 app_state = {
@@ -242,17 +242,33 @@ async def start_telegram_bot(config: Dict[str, Any], services: ProductionService
     logger = logging.getLogger(__name__)
     
     try:
+        # Получаем токен бота
+        bot_token = config.get("bot_token") or config.get("telegram", {}).get("token")
+        if not bot_token:
+            raise ValueError("BOT_TOKEN is required")
+        
+        # Получаем Redis URL
+        redis_url = config.get("redis_url") or config.get("redis", {}).get("url")
+        
+        # Создаем зависимости для бота
+        bot_dependencies = {
+            "ensemble_detector": services.ensemble_detector,
+            "usage_analytics": services.usage_analytics,
+            "user_repository": services.user_repo,
+            "message_repository": services.message_repo,
+            "ban_user_usecase": services.ban_user_usecase,
+            "config": config
+        }
+        
         # Создаем бота
-        bot = TelegramBot(
-            token=config.get("bot_token") or config.get("telegram", {}).get("token"),
-            config=config.get("telegram", {})
+        bot = AntiSpamBot(
+            bot_token=bot_token,
+            redis_url=redis_url,
+            dependencies=bot_dependencies
         )
         
-        # Настраиваем обработчики
-        setup_handlers(bot.dp, services)
-        
         # Запускаем бота
-        await bot.start()
+        await bot.start_polling()
         app_state["telegram_bot"] = bot
         
         logger.info("✅ Telegram bot started successfully")
@@ -376,6 +392,64 @@ def setup_routes(app: FastAPI):
     print("✅ Routes configured")
 
 
+def config_to_dict(config) -> Dict[str, Any]:
+    """Преобразует Config объект в плоский словарь"""
+    result = {}
+    
+    # Основные параметры из переменных окружения
+    result["bot_token"] = os.getenv("BOT_TOKEN")
+    result["database_url"] = os.getenv("DATABASE_URL")
+    result["redis_url"] = os.getenv("REDIS_URL")
+    result["openai_api_key"] = os.getenv("OPENAI_API_KEY")
+    result["admin_chat_id"] = os.getenv("ADMIN_CHAT_ID")
+    result["admin_users"] = os.getenv("ADMIN_USERS", "").split(",") if os.getenv("ADMIN_USERS") else []
+    result["environment"] = os.getenv("ENVIRONMENT", "development")
+    result["log_level"] = os.getenv("LOG_LEVEL", "INFO")
+    result["jwt_secret"] = os.getenv("JWT_SECRET_KEY")
+    result["api_secret"] = os.getenv("API_SECRET_KEY")
+    
+    # Если есть конфиг объект, берем из него недостающие параметры
+    if hasattr(config, 'database') and hasattr(config.database, 'url'):
+        result["database_url"] = result["database_url"] or config.database.url
+    if hasattr(config, 'redis') and hasattr(config.redis, 'url'):
+        result["redis_url"] = result["redis_url"] or config.redis.url
+    if hasattr(config, 'telegram') and hasattr(config.telegram, 'token'):
+        result["bot_token"] = result["bot_token"] or config.telegram.token
+    
+    
+    # Настройки спам детекции
+    if hasattr(config, 'spam_detection'):
+        result["spam_detection"] = vars(config.spam_detection) if hasattr(config.spam_detection, '__dict__') else config.spam_detection
+    
+    # OpenAI конфигурация
+    if hasattr(config, 'openai'):
+        result["openai"] = vars(config.openai) if hasattr(config.openai, '__dict__') else config.openai
+    
+    # Внешние API
+    if hasattr(config, 'external_apis'):
+        result["external_apis"] = vars(config.external_apis) if hasattr(config.external_apis, '__dict__') else config.external_apis
+    
+    # Настройки логирования
+    if hasattr(config, 'logging'):
+        result["logging"] = vars(config.logging) if hasattr(config.logging, '__dict__') else config.logging
+    
+    # API настройки для JWT
+    result["api"] = {
+        "auth": {
+            "jwt_secret": result["jwt_secret"] or "development_jwt_secret_32_chars_minimum_length_required",
+            "jwt_algorithm": "HS256",
+            "access_token_expire_minutes": 30
+        },
+        "rate_limit": {
+            "default_requests_per_minute": 60,
+            "default_requests_per_day": 5000,
+            "burst_limit": 10
+        }
+    }
+    
+    return result
+
+
 def setup_signal_handlers():
     """Настройка обработчиков сигналов для graceful shutdown"""
     def signal_handler(signum, frame):
@@ -470,7 +544,9 @@ async def main():
         if run_mode == "telegram":
             # Только Telegram bot
             config = load_config()
-            validated_config = validate_production_config(config)
+            # Преобразуем Config в плоский словарь для совместимости
+            config_dict = config_to_dict(config)
+            validated_config = validate_production_config(config_dict)
             setup_logging(validated_config)
             
             services = await setup_production_services(validated_config)

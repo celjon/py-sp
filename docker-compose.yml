@@ -4,14 +4,14 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: antispam_db
+      POSTGRES_DB: antispam
       POSTGRES_USER: antispam
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U antispam"]
       interval: 10s
@@ -21,7 +21,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6381:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -38,25 +38,25 @@ services:
       redis:
         condition: service_healthy
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=${ENVIRONMENT:-development}
       - BOT_TOKEN=${BOT_TOKEN}
       - ADMIN_CHAT_ID=${ADMIN_CHAT_ID}
       - ADMIN_USERS=${ADMIN_USERS}
-      - DATABASE_URL=postgresql://antispam:${POSTGRES_PASSWORD:-password}@postgres:5432/antispam_db
-      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CAS_API_URL=${CAS_API_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - API_SECRET_KEY=${API_SECRET_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - RUN_MODE=${RUN_MODE:-telegram}
     ports:
       - "8080:8080"
     volumes:
       - ./logs:/app/logs
       - ./models:/app/models
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    command: ["python", "run_bot.py"]
 
   # Nginx для проксирования (опционально)
   nginx:

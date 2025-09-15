@@ -7,13 +7,13 @@ Production-ready Authentication Routes v2.0
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Request, Depends, status, Response
+from fastapi import APIRouter, HTTPException, Request, Depends, status, Response, Body, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, EmailStr, validator
 
 from ....config.dependencies import get_dependencies_for_routes
 from ....domain.service.auth.jwt_service import JWTService, TokenPair
-from ....domain.service.analytics.usage_analytics import UsageAnalytics
+from ....domain.analytics.usage_analytics import UsageAnalytics
 from ....domain.usecase.api.manage_keys import ManageApiKeysUseCase, CreateApiKeyRequest
 from ....domain.entity.api_key import ApiKeyPlan, ApiKeyStatus
 from ....domain.entity.client_usage import RequestStatus
@@ -305,7 +305,7 @@ async def refresh_access_token(
     description="Отзывает access или refresh токен"
 )
 async def revoke_token(
-    token: str = Field(..., description="Токен для отзыва"),
+    token: str = Body(..., description="Токен для отзыва"),
     jwt_service: JWTService = Depends(deps["get_jwt_service"])
 ):
     """Отзыв токена"""
@@ -484,11 +484,11 @@ console.log(data);
     description="Возвращает список всех API ключей с аналитикой"
 )
 async def list_api_keys_v2(
-    plan: Optional[ApiKeyPlan] = None,
-    status: Optional[ApiKeyStatus] = None,
-    limit: int = Field(50, ge=1, le=200),
-    offset: int = Field(0, ge=0),
-    include_usage_stats: bool = Field(True, description="Включить статистику использования"),
+    plan: Optional[ApiKeyPlan] = Query(None),
+    status: Optional[ApiKeyStatus] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    include_usage_stats: bool = Query(True, description="Включить статистику использования"),
     admin=Depends(verify_admin_credentials),
     manage_keys_usecase: ManageApiKeysUseCase = Depends(deps["get_manage_api_keys_usecase"]),
     usage_analytics: UsageAnalytics = Depends(deps["get_usage_analytics"])
@@ -557,7 +557,7 @@ async def list_api_keys_v2(
     description="Возвращает общую аналитику по всем API ключам"
 )
 async def get_analytics_overview(
-    hours: int = Field(24, ge=1, le=168, description="Период в часах"),
+    hours: int = Query(24, ge=1, le=168, description="Период в часах"),
     admin=Depends(verify_admin_credentials),
     usage_analytics: UsageAnalytics = Depends(deps["get_usage_analytics"])
 ):
@@ -587,8 +587,8 @@ async def get_analytics_overview(
 )
 async def get_key_analytics(
     key_id: int,
-    period: str = Field("hour", regex="^(hour|day|week)$"),
-    hours_back: int = Field(24, ge=1, le=720),
+    period: str = Query("hour", pattern="^(hour|day|week)$"),
+    hours_back: int = Query(24, ge=1, le=720),
     admin=Depends(verify_admin_credentials),
     usage_analytics: UsageAnalytics = Depends(deps["get_usage_analytics"])
 ):

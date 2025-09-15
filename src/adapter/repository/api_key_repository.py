@@ -1,5 +1,6 @@
 from typing import Optional, List
 import asyncpg
+import json
 from datetime import datetime, timedelta
 from ...domain.entity.api_key import ApiKey, ApiKeyStatus, ApiKeyPlan
 from ...lib.clients.postgres_client import PostgresClient
@@ -34,7 +35,7 @@ class ApiKeyRepository:
                 api_key.requests_per_month,
                 api_key.allowed_ips,
                 api_key.webhook_url,
-                api_key.metadata,
+                json.dumps(api_key.metadata) if api_key.metadata else None,
                 api_key.expires_at
             )
             
@@ -257,6 +258,22 @@ class ApiKeyRepository:
         async with self.db.acquire() as conn:
             rows = await conn.fetch(query, *params)
             return [self._row_to_api_key(row) for row in rows]
+
+    async def list_keys(self, limit: int = 100, offset: int = 0) -> List[ApiKey]:
+        """
+        Получить список API ключей (простой метод для совместимости)
+        
+        Args:
+            limit: Максимальное количество ключей
+            offset: Смещение для пагинации
+            
+        Returns:
+            List[ApiKey]: Список API ключей
+        """
+        return await self.search_api_keys(
+            limit=limit,
+            offset=offset
+        )
 
     def _row_to_api_key(self, row: asyncpg.Record) -> ApiKey:
         """Преобразовать строку БД в объект ApiKey"""
