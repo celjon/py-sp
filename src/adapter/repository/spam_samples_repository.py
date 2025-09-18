@@ -1,6 +1,7 @@
 """
 Репозиторий для работы с образцами спама
 """
+
 from typing import List, Optional
 import asyncpg
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,7 @@ class SpamSamplesRepository:
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id, created_at, updated_at
         """
-        
+
         async with self.db.acquire() as conn:
             row = await conn.fetchrow(
                 query,
@@ -30,16 +31,18 @@ class SpamSamplesRepository:
                 sample.user_id,
                 sample.language,
                 sample.confidence,
-                sample.tags
+                sample.tags,
             )
-            
+
             # Обновляем ID и временные метки
-            sample.id = row['id']
-            sample.created_at = row['created_at']
-            sample.updated_at = row['updated_at']
+            sample.id = row["id"]
+            sample.created_at = row["created_at"]
+            sample.updated_at = row["updated_at"]
             return sample
 
-    async def get_samples_by_type(self, sample_type: SampleType, limit: int = 100) -> List[SpamSample]:
+    async def get_samples_by_type(
+        self, sample_type: SampleType, limit: int = 100
+    ) -> List[SpamSample]:
         """Получить образцы определенного типа"""
         query = """
         SELECT * FROM spam_samples 
@@ -47,7 +50,7 @@ class SpamSamplesRepository:
         ORDER BY created_at DESC 
         LIMIT $2
         """
-        
+
         async with self.db.acquire() as conn:
             rows = await conn.fetch(query, sample_type.value, limit)
             return [self._row_to_sample(row) for row in rows]
@@ -60,7 +63,7 @@ class SpamSamplesRepository:
         ORDER BY created_at DESC 
         LIMIT $2
         """
-        
+
         async with self.db.acquire() as conn:
             rows = await conn.fetch(query, language, limit)
             return [self._row_to_sample(row) for row in rows]
@@ -74,7 +77,7 @@ class SpamSamplesRepository:
         ORDER BY created_at DESC 
         LIMIT $2
         """
-        
+
         async with self.db.acquire() as conn:
             rows = await conn.fetch(query, since, limit)
             return [self._row_to_sample(row) for row in rows]
@@ -87,7 +90,7 @@ class SpamSamplesRepository:
         ORDER BY created_at DESC 
         LIMIT $2
         """
-        
+
         search_pattern = f"%{text}%"
         async with self.db.acquire() as conn:
             rows = await conn.fetch(query, search_pattern, limit)
@@ -107,7 +110,7 @@ class SpamSamplesRepository:
     async def delete_sample(self, sample_id: int) -> bool:
         """Удалить образец"""
         query = "DELETE FROM spam_samples WHERE id = $1"
-        
+
         async with self.db.acquire() as conn:
             result = await conn.execute(query, sample_id)
             return result != "DELETE 0"
@@ -115,16 +118,15 @@ class SpamSamplesRepository:
     def _row_to_sample(self, row: asyncpg.Record) -> SpamSample:
         """Преобразовать строку БД в объект SpamSample"""
         return SpamSample(
-            id=row['id'],
-            text=row['text'],
-            type=SampleType(row['type']),
-            source=SampleSource(row['source']),
-            chat_id=row['chat_id'],
-            user_id=row['user_id'],
-            language=row['language'],
-            confidence=row['confidence'],
-            tags=row['tags'] or [],
-            created_at=row['created_at'],
-            updated_at=row['updated_at']
+            id=row["id"],
+            text=row["text"],
+            type=SampleType(row["type"]),
+            source=SampleSource(row["source"]),
+            chat_id=row["chat_id"],
+            user_id=row["user_id"],
+            language=row["language"],
+            confidence=row["confidence"],
+            tags=row["tags"] or [],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )
-

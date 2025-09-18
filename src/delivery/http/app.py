@@ -8,18 +8,22 @@ from typing import Dict, Any, Optional
 import asyncio
 
 from ...config.config import load_config
-from ...config.dependencies import integrate_with_fastapi_app, validate_production_config, setup_production_services
+from ...config.dependencies import (
+    integrate_with_fastapi_app,
+    validate_production_config,
+    setup_production_services,
+)
 import inspect
-from .routes import auth_v2 as auth, admin, stats  
+from .routes import auth_v2 as auth, admin, stats
 from .routes import public_api_v2 as public_api
 from .middleware.api_auth import ApiAuthMiddleware
 
 
 def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = None) -> FastAPI:
     """Создание FastAPI приложения с публичным API"""
-    
+
     config = config or load_config()
-    
+
     app = FastAPI(
         title="AntiSpam Bot API",
         description="""
@@ -90,29 +94,25 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
         openapi_tags=[
             {
                 "name": "spam-detection",
-                "description": "🔍 Детекция спама - основной функционал API"
+                "description": "🔍 Детекция спама - основной функционал API",
             },
+            {"name": "auth", "description": "🔐 Управление API ключами и аутентификация"},
             {
-                "name": "auth",
-                "description": "🔐 Управление API ключами и аутентификация"
+                "name": "statistics",
+                "description": "📊 Статистика использования и производительности",
             },
-            {
-                "name": "statistics", 
-                "description": "📊 Статистика использования и производительности"
-            },
-            {
-                "name": "admin",
-                "description": "🛡️ Административные функции (требует админских прав)"
-            }
-        ]
+            {"name": "admin", "description": "🛡️ Административные функции (требует админских прав)"},
+        ],
     )
-    
+
     # Сохраняем зависимости в app state
     app.state.dependencies = dependencies or {}
     app.state.config = config
-    
+
     # Приводим конфиг к dict для универсального доступа
-    http_cfg = config.get("http_server", {}) if isinstance(config, dict) else (config.http_server or {})
+    http_cfg = (
+        config.get("http_server", {}) if isinstance(config, dict) else (config.http_server or {})
+    )
 
     # Настройка CORS (только для development)
     if http_cfg.get("cors_enabled", False):
@@ -125,7 +125,7 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
             allow_headers=["*"],
         )
         print(f"🌐 CORS enabled for origins: {allowed_origins}")
-    
+
     # Если зависимости переданы корутиной, аккуратно разрешаем
     if dependencies and inspect.iscoroutine(dependencies):
         try:
@@ -145,8 +145,12 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
     # API Authentication middleware для публичных endpoints (если есть все зависимости)
     jwt_service = dependencies.get("jwt_service") if isinstance(dependencies, dict) else None
     rate_limiter = dependencies.get("rate_limiter") if isinstance(dependencies, dict) else None
-    api_key_repo = dependencies.get("api_key_repository") or dependencies.get("api_key_repo") if isinstance(dependencies, dict) else None
-    
+    api_key_repo = (
+        dependencies.get("api_key_repository") or dependencies.get("api_key_repo")
+        if isinstance(dependencies, dict)
+        else None
+    )
+
     if jwt_service and rate_limiter and api_key_repo:
         app.add_middleware(
             ApiAuthMiddleware,
@@ -155,10 +159,10 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
             api_key_repo=api_key_repo,
             protected_paths=[
                 "/api/v1/detect",
-                "/api/v1/detect/batch", 
+                "/api/v1/detect/batch",
                 "/api/v1/stats",
-                "/api/v1/detectors"
-            ]
+                "/api/v1/detectors",
+            ],
         )
         print("🔐 API Authentication middleware добавлен")
 
@@ -166,6 +170,7 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
     if isinstance(dependencies, dict):
         # Создаем мок ProductionServices из словаря
         from types import SimpleNamespace
+
         services = SimpleNamespace()
         for key, value in dependencies.items():
             setattr(services, key, value)
@@ -175,48 +180,59 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
     # Если зависимости не переданы - поднимем прод-сервисы и интегрируем
     if not dependencies:
         try:
-            cfg_dict = config if isinstance(config, dict) else {
-                "database_url": getattr(config, "database_url", None),
-                "redis_url": getattr(config, "redis_url", None),
-                "bot_token": getattr(config, "bot_token", None),
-                "api": {"auth": {"jwt_secret": getattr(config, "api", {}).auth.get("jwt_secret") if isinstance(getattr(config, "api", None), dict) else getattr(getattr(config, "api", None), "auth", {}).get("jwt_secret") if getattr(config, "api", None) else None}},
-                "spam_detection": {"ensemble": http_cfg.get("spam_detection", {}).get("ensemble", {})} if isinstance(config, dict) else {"ensemble": getattr(getattr(config, "spam_detection", None), "ensemble", {})},
-                "openai": getattr(config, "openai", {}) if isinstance(config, dict) else {
-                    "api_key": getattr(config, "openai_api_key", ""),
-                    "enabled": True
+            cfg_dict = (
+                config
+                if isinstance(config, dict)
+                else {
+                    "database_url": getattr(config, "database_url", None),
+                    "redis_url": getattr(config, "redis_url", None),
+                    "bot_token": getattr(config, "bot_token", None),
+                    "api": {
+                        "auth": {
+                            "jwt_secret": (
+                                getattr(config, "api", {}).auth.get("jwt_secret")
+                                if isinstance(getattr(config, "api", None), dict)
+                                else (
+                                    getattr(getattr(config, "api", None), "auth", {}).get(
+                                        "jwt_secret"
+                                    )
+                                    if getattr(config, "api", None)
+                                    else None
+                                )
+                            )
+                        }
+                    },
+                    "spam_detection": (
+                        {"ensemble": http_cfg.get("spam_detection", {}).get("ensemble", {})}
+                        if isinstance(config, dict)
+                        else {
+                            "ensemble": getattr(
+                                getattr(config, "spam_detection", None), "ensemble", {}
+                            )
+                        }
+                    ),
+                    "openai": (
+                        getattr(config, "openai", {})
+                        if isinstance(config, dict)
+                        else {"api_key": getattr(config, "openai_api_key", ""), "enabled": True}
+                    ),
                 }
-            }
+            )
             validated = validate_production_config(cfg_dict)
             services = asyncio.run(setup_production_services(validated))
             integrate_with_fastapi_app(app, services, validated)
             print("🔌 Integrated production services into FastAPI app")
         except Exception as e:
             print(f"⚠️ Failed to auto-setup production services: {e}")
-    
+
     # Включаем роутеры
-    app.include_router(
-        public_api.router, 
-        prefix="/api/v1", 
-        tags=["spam-detection"]
-    )
-    app.include_router(
-        auth.router, 
-        prefix="/api/v1/auth", 
-        tags=["auth"]
-    )
-    app.include_router(
-        stats.router, 
-        prefix="/api/v1", 
-        tags=["statistics"]
-    )
-    app.include_router(
-        admin.router, 
-        prefix="/api/v1/admin", 
-        tags=["admin"]
-    )
-    
+    app.include_router(public_api.router, prefix="/api/v1", tags=["spam-detection"])
+    app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(stats.router, prefix="/api/v1", tags=["statistics"])
+    app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+
     print("✅ Все API routes подключены")
-    
+
     # Health check endpoint
     @app.get("/health", tags=["monitoring"])
     async def health_check():
@@ -224,38 +240,30 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
         try:
             dependencies = app.state.dependencies
             spam_detector = dependencies.get("spam_detector")
-            
+
             if spam_detector:
                 health = await spam_detector.health_check()
                 return {
                     "status": "healthy",
                     "timestamp": time.time(),
                     "version": "2.0.0",
-                    "api": {
-                        "public_endpoints": 4,
-                        "admin_endpoints": 8,
-                        "auth_endpoints": 6
-                    },
+                    "api": {"public_endpoints": 4, "admin_endpoints": 8, "auth_endpoints": 6},
                     "detectors": health.get("detectors", {}),
-                    "services": "operational"
+                    "services": "operational",
                 }
             else:
                 return {
-                    "status": "degraded", 
+                    "status": "degraded",
                     "timestamp": time.time(),
                     "version": "2.0.0",
-                    "message": "Spam detector not available"
+                    "message": "Spam detector not available",
                 }
         except Exception as e:
             return JSONResponse(
                 status_code=503,
-                content={
-                    "status": "unhealthy",
-                    "timestamp": time.time(),
-                    "error": str(e)
-                }
+                content={"status": "unhealthy", "timestamp": time.time(), "error": str(e)},
             )
-    
+
     # Metrics endpoint (Prometheus format)
     @app.get("/metrics", tags=["monitoring"])
     async def metrics():
@@ -264,18 +272,18 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
             dependencies = app.state.dependencies
             message_repo = dependencies.get("message_repository")
             usage_repo = dependencies.get("usage_repository")
-            
+
             if not usage_repo:
                 raise HTTPException(status_code=503, detail="Metrics service not available")
-            
+
             # Получаем глобальную статистику API
             api_stats = await usage_repo.get_global_usage_stats(hours=24)
-            
+
             # Получаем статистику Telegram (если доступна)
             telegram_stats = {}
             if message_repo:
                 telegram_stats = await message_repo.get_global_stats(hours=24)
-            
+
             metrics_text = f"""# HELP api_requests_total Total number of API requests
 # TYPE api_requests_total counter
 api_requests_total {api_stats.get('total_requests', 0)}
@@ -304,15 +312,12 @@ telegram_spam_messages_total {telegram_stats.get('spam_messages', 0)}
 # TYPE telegram_clean_messages_total counter
 telegram_clean_messages_total {telegram_stats.get('clean_messages', 0)}
 """
-            
-            return JSONResponse(
-                content=metrics_text,
-                media_type="text/plain"
-            )
-            
+
+            return JSONResponse(content=metrics_text, media_type="text/plain")
+
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Metrics error: {str(e)}")
-    
+
     # Root endpoint with API info
     @app.get("/", tags=["info"])
     async def root():
@@ -331,66 +336,53 @@ telegram_clean_messages_total {telegram_stats.get('clean_messages', 0)}
                         "detect_spam": "POST /api/v1/detect",
                         "batch_detect": "POST /api/v1/detect/batch",
                         "usage_stats": "GET /api/v1/stats",
-                        "detectors_info": "GET /api/v1/detectors"
-                    }
+                        "detectors_info": "GET /api/v1/detectors",
+                    },
                 },
                 "auth": {
                     "base_url": "/api/v1/auth",
                     "endpoints": {
                         "create_key": "POST /api/v1/auth/keys",
-                        "list_keys": "GET /api/v1/auth/keys", 
-                        "global_stats": "GET /api/v1/auth/stats"
-                    }
+                        "list_keys": "GET /api/v1/auth/keys",
+                        "global_stats": "GET /api/v1/auth/stats",
+                    },
                 },
-                "admin": {
-                    "base_url": "/api/v1/admin",
-                    "authentication": "Basic Auth required"
-                }
+                "admin": {"base_url": "/api/v1/admin", "authentication": "Basic Auth required"},
             },
             "features": [
                 "Многослойная детекция спама",
-                "Поддержка русского и английского языков", 
+                "Поддержка русского и английского языков",
                 "Rate limiting по API ключам",
                 "Real-time статистика использования",
                 "Batch обработка до 100 сообщений",
                 "Webhook уведомления",
-                "IP whitelist для безопасности"
+                "IP whitelist для безопасности",
             ],
-            "contact": {
-                "docs": "/docs",
-                "support": "admin@antispam.example.com"
-            }
+            "contact": {"docs": "/docs", "support": "admin@antispam.example.com"},
         }
-    
+
     # OpenAPI customization
     @app.get("/openapi.json", include_in_schema=False)
     async def custom_openapi():
         """Кастомизированная OpenAPI схема"""
         from fastapi.openapi.utils import get_openapi
-        
+
         if app.openapi_schema:
             return app.openapi_schema
-        
+
         openapi_schema = get_openapi(
             title="AntiSpam Bot API",
             version="2.0.0",
             description=app.description,
             routes=app.routes,
         )
-        
+
         # Добавляем примеры аутентификации
         openapi_schema["components"]["securitySchemes"] = {
-            "ApiKeyAuth": {
-                "type": "http",
-                "scheme": "bearer",
-                "bearerFormat": "API Key"
-            },
-            "BasicAuth": {
-                "type": "http", 
-                "scheme": "basic"
-            }
+            "ApiKeyAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "API Key"},
+            "BasicAuth": {"type": "http", "scheme": "basic"},
         }
-        
+
         # Добавляем security для всех endpoints
         for path, methods in openapi_schema["paths"].items():
             for method, details in methods.items():
@@ -400,10 +392,10 @@ telegram_clean_messages_total {telegram_stats.get('clean_messages', 0)}
                     details["security"] = [{"BasicAuth": []}]
                 elif path.startswith("/api/v1/admin"):
                     details["security"] = [{"BasicAuth": []}]
-        
+
         app.openapi_schema = openapi_schema
         return app.openapi_schema
-    
+
     # Error handlers
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request, exc):
@@ -413,10 +405,10 @@ telegram_clean_messages_total {telegram_stats.get('clean_messages', 0)}
                 "error": exc.detail,
                 "timestamp": time.time(),
                 "path": str(request.url.path),
-                "method": request.method
-            }
+                "method": request.method,
+            },
         )
-    
+
     @app.exception_handler(Exception)
     async def general_exception_handler(request, exc):
         print(f"Unhandled API error: {exc}")
@@ -426,10 +418,10 @@ telegram_clean_messages_total {telegram_stats.get('clean_messages', 0)}
                 "error": "Internal server error",
                 "message": "An unexpected error occurred",
                 "timestamp": time.time(),
-                "path": str(request.url.path)
-            }
+                "path": str(request.url.path),
+            },
         )
-    
+
     # Startup event
     @app.on_event("startup")
     async def startup_event():
@@ -438,17 +430,18 @@ telegram_clean_messages_total {telegram_stats.get('clean_messages', 0)}
         print("🔍 ReDoc: http://localhost:8080/redoc")
         print("📊 Health: http://localhost:8080/health")
         print("📈 Metrics: http://localhost:8080/metrics")
-    
+
     # Shutdown event
     @app.on_event("shutdown")
     async def shutdown_event():
         print("⏹️ FastAPI приложение остановлено")
-    
+
     return app
 
 
 # Global app instance для импорта
 app = None
+
 
 def get_app() -> FastAPI:
     """Получить экземпляр приложения"""

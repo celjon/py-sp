@@ -3,6 +3,7 @@ import aiogram
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
+
 class TelegramGateway:
     def __init__(self, bot: Bot):
         self.bot = bot
@@ -11,9 +12,7 @@ class TelegramGateway:
         """Забанить пользователя в чате"""
         try:
             await self.bot.ban_chat_member(
-                chat_id=chat_id,
-                user_id=user_id,
-                revoke_messages=delete_messages
+                chat_id=chat_id, user_id=user_id, revoke_messages=delete_messages
             )
             return True
         except (TelegramBadRequest, TelegramForbiddenError) as e:
@@ -33,8 +32,8 @@ class TelegramGateway:
                     can_send_photos=False,
                     can_send_videos=False,
                     can_send_video_notes=False,
-                    can_send_voice_notes=False
-                )
+                    can_send_voice_notes=False,
+                ),
             )
             return True
         except (TelegramBadRequest, TelegramForbiddenError) as e:
@@ -53,16 +52,8 @@ class TelegramGateway:
     async def send_message(self, chat_id: int, text: str, reply_to: Optional[int] = None) -> bool:
         """Отправить сообщение"""
         try:
-            await self.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_to_message_id=reply_to
-            )
+            await self.bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=reply_to)
             return True
         except (TelegramBadRequest, TelegramForbiddenError) as e:
             print(f"Failed to send message to chat {chat_id}: {e}")
             return False
-
-
-
-

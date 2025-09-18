@@ -6,6 +6,7 @@ from typing import Optional
 
 class UserStatus(Enum):
     """Статус пользователя в системе"""
+
     ACTIVE = "active"
     BANNED = "banned"
     RESTRICTED = "restricted"
@@ -15,27 +16,28 @@ class UserStatus(Enum):
 @dataclass
 class User:
     """Доменная сущность пользователя"""
+
     telegram_id: int
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     status: UserStatus = UserStatus.ACTIVE
-    
+
     # Статистика
     message_count: int = 0
     spam_score: float = 0.0
-    
+
     # Временные метки
     first_message_at: Optional[datetime] = None
     last_message_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
-    
+
     # Флаги
     is_admin: bool = False
-    
+
     # Системные поля
     id: Optional[int] = None
-    
+
     @property
     def display_name(self) -> str:
         """Возвращает отображаемое имя пользователя"""
@@ -47,53 +49,50 @@ class User:
             return self.first_name
         else:
             return f"User {self.telegram_id}"
-    
+
     @property
     def is_new_user(self) -> bool:
         """Проверяет, является ли пользователь новым (мало сообщений)"""
         return self.message_count <= 5
-    
+
     @property
     def is_suspicious(self) -> bool:
         """Проверяет, подозрителен ли пользователь"""
-        return (
-            self.spam_score > 0.5 or 
-            (self.is_new_user and self.spam_score > 0.3)
-        )
-    
+        return self.spam_score > 0.5 or (self.is_new_user and self.spam_score > 0.3)
+
     @property
     def is_banned(self) -> bool:
         """Проверяет, забанен ли пользователь"""
         return self.status == UserStatus.BANNED
-    
+
     @property
     def is_restricted(self) -> bool:
         """Проверяет, ограничен ли пользователь"""
         return self.status == UserStatus.RESTRICTED
-    
-    def ban(self):
+
+    def ban(self) -> None:
         """Банит пользователя"""
         self.status = UserStatus.BANNED
-    
-    def restrict(self):
+
+    def restrict(self) -> None:
         """Ограничивает пользователя"""
         self.status = UserStatus.RESTRICTED
-    
-    def activate(self):
+
+    def activate(self) -> None:
         """Активирует пользователя"""
         self.status = UserStatus.ACTIVE
-    
-    def update_spam_score(self, score: float):
+
+    def update_spam_score(self, score: float) -> None:
         """Обновляет спам-скор пользователя"""
         # Используем экспоненциальное сглаживание
         alpha = 0.3
         self.spam_score = alpha * score + (1 - alpha) * self.spam_score
-    
-    def increment_message_count(self):
+
+    def increment_message_count(self) -> None:
         """Увеличивает счетчик сообщений"""
         self.message_count += 1
         self.last_message_at = datetime.now()
-        
+
         if self.first_message_at is None:
             self.first_message_at = datetime.now()
 
@@ -101,10 +100,10 @@ class User:
 @dataclass
 class UserContext:
     """Контекст пользователя для детекции спама"""
+
     user_id: int
     is_new_user: bool = False
     is_admin_or_owner: bool = False
     chat_id: Optional[int] = None
     message_count: int = 0
     spam_score: float = 0.0
-

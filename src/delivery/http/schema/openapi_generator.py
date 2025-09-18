@@ -12,17 +12,17 @@ from fastapi.openapi.utils import get_openapi
 def generate_production_openapi_schema(app: FastAPI) -> Dict[str, Any]:
     """
     Генерирует production-ready OpenAPI схему с детальной документацией
-    
+
     Args:
         app: FastAPI приложение
-        
+
     Returns:
         Полная OpenAPI схема
     """
-    
+
     if app.openapi_schema:
         return app.openapi_schema
-    
+
     # Базовая схема
     openapi_schema = get_openapi(
         title="AntiSpam Detection API",
@@ -30,21 +30,12 @@ def generate_production_openapi_schema(app: FastAPI) -> Dict[str, Any]:
         description=_get_api_description(),
         routes=app.routes,
         servers=[
-            {
-                "url": "https://api.antispam.com",
-                "description": "Production Server"
-            },
-            {
-                "url": "https://staging.api.antispam.com", 
-                "description": "Staging Server"
-            },
-            {
-                "url": "http://localhost:8080",
-                "description": "Development Server"
-            }
-        ]
+            {"url": "https://api.antispam.com", "description": "Production Server"},
+            {"url": "https://staging.api.antispam.com", "description": "Staging Server"},
+            {"url": "http://localhost:8080", "description": "Development Server"},
+        ],
     )
-    
+
     # Добавляем кастомизации
     _add_security_schemes(openapi_schema)
     _add_response_examples(openapi_schema)
@@ -52,7 +43,7 @@ def generate_production_openapi_schema(app: FastAPI) -> Dict[str, Any]:
     _add_rate_limiting_info(openapi_schema)
     _add_usage_examples(openapi_schema)
     _add_sdk_information(openapi_schema)
-    
+
     # Кэшируем схему
     app.openapi_schema = openapi_schema
     return openapi_schema
@@ -119,50 +110,46 @@ def _add_security_schemes(openapi_schema: Dict[str, Any]) -> None:
     """Добавляет схемы безопасности"""
     if "components" not in openapi_schema:
         openapi_schema["components"] = {}
-    
+
     openapi_schema["components"]["securitySchemes"] = {
         "ApiKeyAuth": {
             "type": "http",
             "scheme": "bearer",
             "bearerFormat": "API Key",
-            "description": "API ключ в формате: `antispam_your_api_key_here`"
+            "description": "API ключ в формате: `antispam_your_api_key_here`",
         },
         "JWTAuth": {
-            "type": "http", 
+            "type": "http",
             "scheme": "bearer",
             "bearerFormat": "JWT",
-            "description": "JWT токен, полученный через `/auth/token`"
+            "description": "JWT токен, полученный через `/auth/token`",
         },
         "ApiKeyHeader": {
             "type": "apiKey",
             "in": "header",
             "name": "X-API-Key",
-            "description": "API ключ в заголовке X-API-Key"
+            "description": "API ключ в заголовке X-API-Key",
         },
         "BasicAuth": {
             "type": "http",
             "scheme": "basic",
-            "description": "Basic Auth для админских endpoints"
-        }
+            "description": "Basic Auth для админских endpoints",
+        },
     }
-    
+
     # Глобальная безопасность
-    openapi_schema["security"] = [
-        {"ApiKeyAuth": []},
-        {"JWTAuth": []},
-        {"ApiKeyHeader": []}
-    ]
+    openapi_schema["security"] = [{"ApiKeyAuth": []}, {"JWTAuth": []}, {"ApiKeyHeader": []}]
 
 
 def _add_response_examples(openapi_schema: Dict[str, Any]) -> None:
     """Добавляет примеры ответов"""
-    
+
     # Схемы компонентов
     if "components" not in openapi_schema:
         openapi_schema["components"] = {}
     if "schemas" not in openapi_schema["components"]:
         openapi_schema["components"]["schemas"] = {}
-    
+
     # Примеры успешных ответов
     openapi_schema["components"]["schemas"]["SpamDetectionExample"] = {
         "type": "object",
@@ -175,25 +162,25 @@ def _add_response_examples(openapi_schema: Dict[str, Any]) -> None:
             "notes": "Обнаружена реклама с призывом к контакту в ЛС",
             "processing_time_ms": 342.5,
             "detection_id": "det_1234567890abcdef",
-            "api_version": "2.0"
-        }
+            "api_version": "2.0",
+        },
     }
-    
+
     openapi_schema["components"]["schemas"]["CleanMessageExample"] = {
-        "type": "object", 
+        "type": "object",
         "example": {
             "is_spam": False,
             "confidence": 0.15,
-            "primary_reason": "heuristics",
+            "primary_reason": "openai_clean",
             "reasons": [],
             "recommended_action": "allow",
             "notes": "Сообщение выглядит безопасным",
             "processing_time_ms": 125.8,
             "detection_id": "det_9876543210fedcba",
-            "api_version": "2.0"
-        }
+            "api_version": "2.0",
+        },
     }
-    
+
     openapi_schema["components"]["schemas"]["UsageStatsExample"] = {
         "type": "object",
         "example": {
@@ -201,7 +188,7 @@ def _add_response_examples(openapi_schema: Dict[str, Any]) -> None:
                 "id": 42,
                 "client_name": "My Awesome Bot",
                 "plan": "basic",
-                "status": "active"
+                "status": "active",
             },
             "usage_stats": {
                 "total_requests": 1250,
@@ -212,103 +199,67 @@ def _add_response_examples(openapi_schema: Dict[str, Any]) -> None:
                 "clean_detected": 1109,
                 "spam_detection_rate": 7.43,
                 "avg_confidence": 0.752,
-                "avg_processing_time_ms": 234.5
+                "avg_processing_time_ms": 234.5,
             },
             "rate_limits": {
-                "current": {
-                    "requests_per_minute": 120,
-                    "requests_per_day": 10000
-                },
-                "remaining": {
-                    "requests_per_minute": 85,
-                    "requests_per_day": 8750
-                }
-            }
-        }
+                "current": {"requests_per_minute": 120, "requests_per_day": 10000},
+                "remaining": {"requests_per_minute": 85, "requests_per_day": 8750},
+            },
+        },
     }
 
 
 def _add_error_schemas(openapi_schema: Dict[str, Any]) -> None:
     """Добавляет схемы ошибок"""
-    
+
     openapi_schema["components"]["schemas"]["ErrorResponse"] = {
         "type": "object",
         "properties": {
-            "error": {
-                "type": "string",
-                "description": "Описание ошибки"
-            },
-            "details": {
-                "type": "string", 
-                "description": "Детальная информация об ошибке"
-            },
-            "error_code": {
-                "type": "string",
-                "description": "Код ошибки для программной обработки"
-            },
-            "timestamp": {
-                "type": "number",
-                "description": "Unix timestamp ошибки"
-            },
-            "request_id": {
-                "type": "string",
-                "description": "ID запроса для трейсинга"
-            }
+            "error": {"type": "string", "description": "Описание ошибки"},
+            "details": {"type": "string", "description": "Детальная информация об ошибке"},
+            "error_code": {"type": "string", "description": "Код ошибки для программной обработки"},
+            "timestamp": {"type": "number", "description": "Unix timestamp ошибки"},
+            "request_id": {"type": "string", "description": "ID запроса для трейсинга"},
         },
-        "required": ["error", "timestamp"]
+        "required": ["error", "timestamp"],
     }
-    
+
     openapi_schema["components"]["schemas"]["ValidationError"] = {
         "type": "object",
         "properties": {
-            "error": {
-                "type": "string",
-                "example": "Validation failed"
-            },
+            "error": {"type": "string", "example": "Validation failed"},
             "details": {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "properties": {
-                        "field": {"type": "string"},
-                        "message": {"type": "string"}
-                    }
+                    "properties": {"field": {"type": "string"}, "message": {"type": "string"}},
                 },
                 "example": [
                     {"field": "text", "message": "Text cannot be empty"},
-                    {"field": "context.user_id", "message": "Must be positive integer"}
-                ]
-            }
-        }
+                    {"field": "context.user_id", "message": "Must be positive integer"},
+                ],
+            },
+        },
     }
-    
+
     openapi_schema["components"]["schemas"]["RateLimitError"] = {
         "type": "object",
         "properties": {
-            "error": {
-                "type": "string",
-                "example": "Rate limit exceeded"
-            },
-            "limit_type": {
-                "type": "string", 
-                "example": "per_minute"
-            },
-            "retry_after_seconds": {
-                "type": "integer",
-                "example": 45
-            },
+            "error": {"type": "string", "example": "Rate limit exceeded"},
+            "limit_type": {"type": "string", "example": "per_minute"},
+            "retry_after_seconds": {"type": "integer", "example": 45},
             "reset_time": {
                 "type": "string",
                 "format": "date-time",
-                "example": "2024-01-15T14:30:00Z"
-            }
-        }
+                "example": "2024-01-15T14:30:00Z",
+            },
+        },
     }
 
 
 def _add_rate_limiting_info(openapi_schema: Dict[str, Any]) -> None:
     """Добавляет информацию о rate limiting"""
-    
+
     # Добавляем в описание
     rate_limit_info = """
 
@@ -356,14 +307,14 @@ def make_request_with_retry(url, headers, data, max_retries=3):
 | Enterprise | 1,000+ | Без лимитов | 200 |
 
 """
-    
+
     if "info" in openapi_schema:
         openapi_schema["info"]["description"] += rate_limit_info
 
 
 def _add_usage_examples(openapi_schema: Dict[str, Any]) -> None:
     """Добавляет примеры использования"""
-    
+
     usage_examples = """
 
 ## 🔧 Примеры использования
@@ -477,14 +428,14 @@ curl -X GET "https://api.antispam.com/api/v1/health"
 ```
 
 """
-    
+
     if "info" in openapi_schema:
         openapi_schema["info"]["description"] += usage_examples
 
 
 def _add_sdk_information(openapi_schema: Dict[str, Any]) -> None:
     """Добавляет информацию об SDK"""
-    
+
     sdk_info = """
 
 ## 📦 Официальные SDK
@@ -594,7 +545,7 @@ func main() {
 - **Changelog**: https://docs.antispam.com/changelog
 
 """
-    
+
     if "info" in openapi_schema:
         openapi_schema["info"]["description"] += sdk_info
 
@@ -613,10 +564,10 @@ def customize_swagger_ui() -> Dict[str, Any]:
             "defaultModelsExpandDepth": 2,
             "defaultModelExpandDepth": 2,
             "displayOperationId": True,
-            "tryItOutEnabled": True
+            "tryItOutEnabled": True,
         },
         "swagger_ui_oauth2_redirect_url": None,
-        "swagger_ui_init_oauth": None
+        "swagger_ui_init_oauth": None,
     }
 
 
@@ -624,21 +575,21 @@ def customize_swagger_ui() -> Dict[str, Any]:
 def setup_openapi_documentation(app: FastAPI) -> None:
     """
     Настраивает OpenAPI документацию для FastAPI приложения
-    
+
     Args:
         app: FastAPI приложение
     """
-    
+
     # Кастомизация Swagger UI
     ui_config = customize_swagger_ui()
-    
+
     for key, value in ui_config.items():
         setattr(app, key, value)
-    
+
     # Кастомная схема
     @app.get("/openapi.json", include_in_schema=False)
     async def custom_openapi():
         return generate_production_openapi_schema(app)
-    
+
     print("✅ OpenAPI документация настроена")
     print("📚 Доступна по адресу: /docs")

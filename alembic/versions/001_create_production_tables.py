@@ -28,8 +28,8 @@ def upgrade() -> None:
         sa.Column('contact_email', sa.String(255), nullable=False),
         sa.Column('key_prefix', sa.String(20), nullable=False, comment='Visible part: antispam_XXXXXXXX...'),
         sa.Column('key_hash', sa.String(64), nullable=False, comment='SHA256 hash of full key'),
-        sa.Column('plan', sa.Enum('FREE', 'BASIC', 'PRO', 'ENTERPRISE', name='api_key_plan'), nullable=False),
-        sa.Column('status', sa.Enum('ACTIVE', 'SUSPENDED', 'EXPIRED', 'REVOKED', name='api_key_status'), nullable=False, default='ACTIVE'),
+        sa.Column('plan', sa.Enum('free', 'basic', 'pro', 'enterprise', name='api_key_plan'), nullable=False),
+        sa.Column('status', sa.Enum('active', 'suspended', 'expired', 'revoked', name='api_key_status'), nullable=False, default='active'),
         
         # Rate limiting
         sa.Column('requests_per_minute', sa.Integer(), nullable=False, default=60),
@@ -69,7 +69,7 @@ def upgrade() -> None:
         # Request info
         sa.Column('endpoint', sa.String(100), nullable=False),
         sa.Column('method', sa.String(10), nullable=False),
-        sa.Column('status', sa.Enum('SUCCESS', 'ERROR', 'RATE_LIMITED', 'AUTHENTICATION_FAILED', name='request_status'), nullable=False),
+        sa.Column('status', sa.Enum('success', 'error', 'rate_limited', 'authentication_failed', name='request_status'), nullable=False),
         
         # Client info
         sa.Column('client_ip', sa.String(45), nullable=False),
@@ -133,7 +133,7 @@ def upgrade() -> None:
         sa.Index('ix_spam_samples_spam_type', 'spam_type'),
         
         # Full text search index
-        sa.Index('ix_spam_samples_text_fts', 'text', postgresql_using='gin', postgresql_ops={'text': 'gin_trgm_ops'})
+        sa.Index('ix_spam_samples_text_fts', 'text')
     )
     
     # === RATE LIMIT CACHE TABLE ===
@@ -160,8 +160,8 @@ def upgrade() -> None:
         'error_logs',
         sa.Column('id', sa.BigInteger(), nullable=False),
         sa.Column('error_id', sa.String(8), nullable=False, comment='Short error ID for user reference'),
-        sa.Column('severity', sa.Enum('LOW', 'MEDIUM', 'HIGH', 'CRITICAL', name='error_severity'), nullable=False),
-        sa.Column('category', sa.Enum('VALIDATION', 'AUTHENTICATION', 'AUTHORIZATION', 'RATE_LIMIT', 'EXTERNAL_SERVICE', 'DATABASE', 'CACHE', 'BUSINESS_LOGIC', 'SYSTEM', 'UNKNOWN', name='error_category'), nullable=False),
+        sa.Column('severity', sa.Enum('low', 'medium', 'high', 'critical', name='error_severity'), nullable=False),
+        sa.Column('category', sa.Enum('validation', 'authentication', 'authorization', 'rate_limit', 'external_service', 'database', 'cache', 'business_logic', 'system', 'unknown', name='error_category'), nullable=False),
         
         # Error details
         sa.Column('error_type', sa.String(100), nullable=False, comment='Exception class name'),

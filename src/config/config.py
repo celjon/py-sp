@@ -2,6 +2,7 @@
 Production конфигурационные классы
 Современная архитектура: CAS + RUSpam + OpenAI (БЕЗ эвристик и ML)
 """
+
 import os
 import yaml
 from typing import Dict, Any, List, Optional
@@ -33,6 +34,7 @@ class SpamDetectionConfig:
     Современная конфигурация детекции спама
     БЕЗ устаревших heuristic и ml параметров
     """
+
     ensemble: Dict[str, Any]
     # Дополнительные настройки (опционально)
     ruspam: Optional[Dict[str, Any]] = None
@@ -41,6 +43,7 @@ class SpamDetectionConfig:
 @dataclass
 class RUSpamConfig:
     """Конфигурация RUSpam BERT модели"""
+
     model_name: str = "RUSpam/spamNS_v1"
     min_confidence: float = 0.6
     cache_results: bool = True
@@ -60,6 +63,7 @@ class OpenAIConfig:
 @dataclass
 class APIConfig:
     """Конфигурация публичного API"""
+
     rate_limit: Dict[str, Any]
     auth: Dict[str, Any]
     features: Dict[str, Any]
@@ -68,6 +72,7 @@ class APIConfig:
 @dataclass
 class Config:
     """Основная конфигурация системы"""
+
     database: DatabaseConfig
     redis: RedisConfig
     telegram: TelegramConfig
@@ -77,7 +82,7 @@ class Config:
     moderation: Dict[str, Any]
     logging: Dict[str, Any]
     http_server: Dict[str, Any]
-    
+
     # Новые секции
     ruspam: Optional[RUSpamConfig] = None
     api: Optional[APIConfig] = None
@@ -108,10 +113,10 @@ class Config:
 
     @property
     def log_level(self) -> str:
-        return self.logging.get("level", "INFO")
+        return str(self.logging.get("level", "INFO"))
 
 
-def load_config(env: str = None) -> Config:
+def load_config(env: Optional[str] = None) -> Config:
     """Загрузить конфигурацию для указанного окружения"""
     # Определяем окружение из переменной среды или по умолчанию
     if env is None:
@@ -120,22 +125,22 @@ def load_config(env: str = None) -> Config:
     # Определяем путь к конфигурационному файлу
     config_dir = Path(__file__).parent.parent.parent / "config"
     config_file = config_dir / f"{env}.yaml"
-    
+
     if not config_file.exists():
         print(f"⚠️ Config file {config_file} not found, using defaults")
         return _create_default_config()
-    
+
     # Загружаем YAML
-    with open(config_file, 'r', encoding='utf-8') as f:
+    with open(config_file, "r", encoding="utf-8") as f:
         config_data = yaml.safe_load(f)
-    
+
     # Заменяем переменные окружения
     config_data = _substitute_env_variables(config_data)
-    
+
     # Создаем объекты конфигурации
     database_config = DatabaseConfig(**config_data["database"])
     redis_config = RedisConfig(**config_data["redis"])
-    
+
     telegram_data = config_data["telegram"]
     # Обрабатываем admin_users - может быть строкой из env или списком
     admin_users = telegram_data["admin_users"]
@@ -153,7 +158,7 @@ def load_config(env: str = None) -> Config:
             except ValueError as e:
                 print(f"❌ Ошибка парсинга ADMIN_USERS: {admin_users} ({e})")
                 admin_users = []
-    
+
     admin_chat_id = telegram_data["admin_chat_id"]
     if isinstance(admin_chat_id, str):
         if admin_chat_id.startswith("${") and admin_chat_id.endswith("}"):
@@ -163,19 +168,17 @@ def load_config(env: str = None) -> Config:
                 admin_chat_id = int(admin_chat_id)
             except ValueError:
                 admin_chat_id = 0
-    
+
     telegram_config = TelegramConfig(
-        token=telegram_data["token"],
-        admin_chat_id=admin_chat_id,
-        admin_users=admin_users
+        token=telegram_data["token"], admin_chat_id=admin_chat_id, admin_users=admin_users
     )
-    
+
     # Современная конфигурация спам-детекции (БЕЗ heuristic и ml)
     spam_detection_config = SpamDetectionConfig(
         ensemble=config_data["spam_detection"]["ensemble"],
-        ruspam=config_data["spam_detection"].get("ruspam")
+        ruspam=config_data["spam_detection"].get("ruspam"),
     )
-    
+
     # OpenAI конфигурация
     openai_data = config_data["openai"]
     openai_config = OpenAIConfig(
@@ -184,19 +187,19 @@ def load_config(env: str = None) -> Config:
         max_tokens=openai_data["max_tokens"],
         temperature=openai_data.get("temperature", 0.0),
         enabled=openai_data.get("enabled", True),
-        system_prompt=openai_data.get("system_prompt")
+        system_prompt=openai_data.get("system_prompt"),
     )
-    
+
     # RUSpam конфигурация (если есть)
     ruspam_config = None
     if "ruspam" in config_data:
         ruspam_config = RUSpamConfig(**config_data["ruspam"])
-    
+
     # API конфигурация (если есть)
     api_config = None
     if "api" in config_data:
         api_config = APIConfig(**config_data["api"])
-    
+
     return Config(
         database=database_config,
         redis=redis_config,
@@ -211,11 +214,11 @@ def load_config(env: str = None) -> Config:
         api=api_config,
         metrics=config_data.get("metrics"),
         performance=config_data.get("performance"),
-        security=config_data.get("security")
+        security=config_data.get("security"),
     )
 
 
-def _substitute_env_variables(data):
+def _substitute_env_variables(data: Any) -> Any:
     """Заменяет ${VAR} на значения переменных окружения"""
     if isinstance(data, dict):
         return {key: _substitute_env_variables(value) for key, value in data.items()}
@@ -232,7 +235,7 @@ def _parse_admin_users(admin_users_str: str) -> List[int]:
     """Парсит строку с admin users в список int"""
     if not admin_users_str or admin_users_str.startswith("${"):
         return []
-    
+
     try:
         if "," in admin_users_str:
             return [int(x.strip()) for x in admin_users_str.split(",") if x.strip()]
@@ -246,16 +249,12 @@ def _parse_admin_users(admin_users_str: str) -> List[int]:
 def _create_default_config() -> Config:
     """Создать конфигурацию по умолчанию из переменных окружения"""
     return Config(
-        database=DatabaseConfig(
-            url=os.getenv("DATABASE_URL")
-        ),
-        redis=RedisConfig(
-            url=os.getenv("REDIS_URL")
-        ),
+        database=DatabaseConfig(url=os.getenv("DATABASE_URL") or ""),
+        redis=RedisConfig(url=os.getenv("REDIS_URL") or ""),
         telegram=TelegramConfig(
             token=os.getenv("BOT_TOKEN", ""),
             admin_chat_id=int(os.getenv("ADMIN_CHAT_ID", "0")),
-            admin_users=_parse_admin_users(os.getenv("ADMIN_USERS", ""))
+            admin_users=_parse_admin_users(os.getenv("ADMIN_USERS", "")),
         ),
         # СОВРЕМЕННАЯ конфигурация детекции (БЕЗ heuristic и ml!)
         spam_detection=SpamDetectionConfig(
@@ -266,7 +265,7 @@ def _create_default_config() -> Config:
                 "use_ruspam": True,
                 "ruspam_min_length": 10,
                 "openai_min_length": 5,
-                "use_openai_fallback": True
+                "use_openai_fallback": True,
             }
         ),
         openai=OpenAIConfig(
@@ -274,40 +273,21 @@ def _create_default_config() -> Config:
             model="gpt-4o-mini",
             max_tokens=150,
             temperature=0.0,
-            enabled=bool(os.getenv("OPENAI_API_KEY"))
+            enabled=bool(os.getenv("OPENAI_API_KEY")),
         ),
         external_apis={
-            "cas": {
-                "api_url": os.getenv("CAS_API_URL"),
-                "timeout": 5,
-                "cache_ttl": 3600
-            }
+            "cas": {"api_url": os.getenv("CAS_API_URL"), "timeout": 5, "cache_ttl": 3600}
         },
-        moderation={
-            "auto_ban_threshold": 0.85,
-            "auto_restrict_threshold": 0.70
-        },
-        logging={
-            "level": "INFO"
-        },
-        http_server={
-            "enabled": True,
-            "host": "0.0.0.0", 
-            "port": 8080
-        },
+        moderation={"auto_ban_threshold": 0.85, "auto_restrict_threshold": 0.70},
+        logging={"level": "INFO"},
+        http_server={"enabled": True, "host": "0.0.0.0", "port": 8080},
         ruspam=RUSpamConfig(),
         api=APIConfig(
-            rate_limit={
-                "default_requests_per_minute": 60,
-                "default_requests_per_day": 5000
-            },
+            rate_limit={"default_requests_per_minute": 60, "default_requests_per_day": 5000},
             auth={
                 "jwt_secret": os.getenv("JWT_SECRET", "dev_secret_change_in_production"),
-                "access_token_expire_minutes": 30
+                "access_token_expire_minutes": 30,
             },
-            features={
-                "batch_detection": True,
-                "usage_analytics": True
-            }
-        )
+            features={"batch_detection": True, "usage_analytics": True},
+        ),
     )

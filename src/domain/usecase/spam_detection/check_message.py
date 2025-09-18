@@ -12,7 +12,9 @@ class MessageRepository(Protocol):
 
 class UserRepository(Protocol):
     async def get_user(self, telegram_id: int) -> User | None: ...
-    async def update_user_stats(self, user_id: int, message_count: int, spam_score: float) -> None: ...
+    async def update_user_stats(
+        self, user_id: int, message_count: int, spam_score: float
+    ) -> None: ...
     async def is_user_approved(self, telegram_id: int) -> bool: ...
 
 
@@ -24,7 +26,7 @@ class CheckMessageUseCase:
         message_repo: MessageRepository,
         user_repo: UserRepository,
         spam_detector: EnsembleDetector,
-        spam_threshold: float = 0.6
+        spam_threshold: float = 0.6,
     ):
         self.message_repo = message_repo
         self.user_repo = user_repo
@@ -37,12 +39,7 @@ class CheckMessageUseCase:
         # Пользователь и контекст
         user = await self.user_repo.get_user(message.user_id)
         if not user:
-            user = User(
-                id=0,
-                telegram_id=message.user_id,
-                message_count=0,
-                spam_score=0.0
-            )
+            user = User(id=0, telegram_id=message.user_id, message_count=0, spam_score=0.0)
 
         if await self.user_repo.is_user_approved(message.user_id):
             result = DetectionResult(
@@ -51,7 +48,7 @@ class CheckMessageUseCase:
                 is_spam=False,
                 overall_confidence=0.0,
                 primary_reason=None,
-                detector_results=[]
+                detector_results=[],
             )
             await self._persist(message, user, result)
             return result
@@ -59,7 +56,9 @@ class CheckMessageUseCase:
         user_context = {
             "message_count": user.message_count,
             "spam_score": user.spam_score,
-            "is_new_user": user.is_new_user if hasattr(user, "is_new_user") else user.message_count == 0,
+            "is_new_user": (
+                user.is_new_user if hasattr(user, "is_new_user") else user.message_count == 0
+            ),
             "chat_id": getattr(message, "chat_id", None),
         }
 
@@ -84,5 +83,3 @@ class CheckMessageUseCase:
 
     def _ema(self, current_value: float, new_value: float, alpha: float) -> float:
         return current_value * (1 - alpha) + new_value * alpha
-
-

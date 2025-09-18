@@ -4,7 +4,7 @@ database:
   pool_size: 10
 
 redis:
-  url: "redis://localhost:6379/0"
+  url: "redis://redis:6379/0"
 
 telegram:
   token: "${BOT_TOKEN}"
