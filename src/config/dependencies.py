@@ -216,13 +216,13 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     Raises:
         RuntimeError: Если критические сервисы не удалось инициализировать
     """
-    logger.info("🚀 Настройка production сервисов...")
+    logger.info("[START] Настройка production сервисов...")
 
     critical_errors = []
     warnings = []
 
     # === INFRASTRUCTURE CLIENTS ===
-    logger.info("📦 Настройка клиентов инфраструктуры...")
+    logger.info("[SETUP] Настройка клиентов инфраструктуры...")
 
     # Database Client (КРИТИЧЕСКИЙ)
     postgres_client = None
@@ -233,10 +233,10 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
 
         postgres_client = PostgresClient(database_url)
         await postgres_client.connect()
-        logger.info("✅ PostgreSQL подключен")
+        logger.info("[OK] PostgreSQL подключен")
     except Exception as e:
         critical_errors.append(f"Database connection failed: {e}")
-        logger.error(f"❌ Database ошибка: {e}")
+        logger.error(f"[ERROR] Database ошибка: {e}")
 
     # Redis Client (НЕ критический)
     redis_client = None
@@ -246,30 +246,30 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         )
 
         if redis_url:
-            logger.info(f"🔌 Подключение к Redis: {redis_url}")
+            logger.info(f"[CONNECT] Подключение к Redis: {redis_url}")
             # Используем RedisCache как клиент
             redis_client = RedisCache(redis_url)
             await redis_client.connect()
 
-            logger.info("✅ Redis подключен")
+            logger.info("[OK] Redis подключен")
         else:
             warnings.append(
                 "Redis не настроен - некоторые функции будут работать в fallback режиме"
             )
-            logger.warning("⚠️ Redis не настроен - URL не найден в конфигурации")
+            logger.warning("[WARN] Redis не настроен - URL не найден в конфигурации")
     except Exception as e:
         warnings.append(f"Redis недоступен: {e}")
-        logger.warning(f"⚠️ Redis ошибка: {e}")
+        logger.warning(f"[WARN] Redis ошибка: {e}")
         logger.exception("Redis connection error details:")
 
     # HTTP Client
     http_client = HttpClient(timeout=config.get("http_client", {}).get("timeout", 30))
-    logger.info("✅ HTTP клиент настроен")
+    logger.info("[OK] HTTP клиент настроен")
 
     # Прерываем если критические ошибки
     if critical_errors:
         error_msg = "; ".join(critical_errors)
-        logger.error(f"❌ Критические ошибки инициализации: {error_msg}")
+        logger.error(f"[ERROR] Критические ошибки инициализации: {error_msg}")
         raise RuntimeError(f"Critical services failed: {error_msg}")
 
     # === REPOSITORIES ===
@@ -282,7 +282,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         message_repo = MessageRepository(postgres_client)
         spam_samples_repo = SpamSamplesRepository(postgres_client)
 
-        logger.info("✅ Репозитории настроены")
+        logger.info("[OK] Репозитории настроены")
     except Exception as e:
         raise RuntimeError(f"Repository initialization failed: {e}")
 
@@ -293,13 +293,13 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
             # Создаем отдельный RedisCache для кэш-слоя, повторно используя URL из конфигурации
             redis_cache = RedisCache(config.get("redis_url") or config.get("redis", {}).get("url"))
             await redis_cache.connect()
-            logger.info("✅ Redis кэш настроен")
+            logger.info("[OK] Redis кэш настроен")
         except Exception as e:
             warnings.append(f"Redis cache initialization failed: {e}")
-            logger.warning(f"⚠️ Redis cache ошибка: {e}")
+            logger.warning(f"[WARN] Redis cache ошибка: {e}")
 
     # === GATEWAYS ===
-    logger.info("🌐 Настройка внешних gateways...")
+    logger.info("[WEB] Настройка внешних gateways...")
 
     # CAS Gateway
     cas_gateway = None
@@ -309,10 +309,10 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
             cache=redis_cache,
             config=config.get("external_apis", {}).get("cas", {}),
         )
-        logger.info("✅ CAS Gateway настроен")
+        logger.info("[OK] CAS Gateway настроен")
     except Exception as e:
         warnings.append(f"CAS Gateway initialization failed: {e}")
-        logger.warning(f"⚠️ CAS Gateway ошибка: {e}")
+        logger.warning(f"[WARN] CAS Gateway ошибка: {e}")
 
     # OpenAI Gateway
     openai_gateway = None
@@ -320,21 +320,21 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         openai_config = config.get("openai", {})
         if openai_config.get("api_key") and openai_config.get("enabled", True):
             openai_gateway = OpenAIGateway(api_key=openai_config["api_key"], config=openai_config)
-            logger.info("✅ OpenAI Gateway настроен")
+            logger.info("[OK] OpenAI Gateway настроен")
         else:
             warnings.append("OpenAI не настроен - спам детекция будет работать без LLM анализа")
-            logger.warning("⚠️ OpenAI не настроен")
+            logger.warning("[WARN] OpenAI не настроен")
     except Exception as e:
         warnings.append(f"OpenAI Gateway initialization failed: {e}")
-        logger.warning(f"⚠️ OpenAI Gateway ошибка: {e}")
+        logger.warning(f"[WARN] OpenAI Gateway ошибка: {e}")
 
     # === CORE SERVICES ===
-    logger.info("⚙️ Настройка core сервисов...")
+    logger.info("[CORE] Настройка core сервисов...")
 
     # JWT Service
     try:
         jwt_service = create_jwt_service(config.get("api", {}).get("auth", {}))
-        logger.info("✅ JWT Service настроен")
+        logger.info("[OK] JWT Service настроен")
     except Exception as e:
         raise RuntimeError(f"JWT Service initialization failed: {e}")
 
@@ -344,9 +344,9 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
             redis_client=redis_client.redis if redis_client else None,
             config=config.get("api", {}).get("rate_limit", {}),
         )
-        logger.info("✅ Rate Limiter настроен")
+        logger.info("[OK] Rate Limiter настроен")
     except Exception as e:
-        logger.error(f"❌ Rate Limiter ошибка: {e}")
+        logger.error(f"[ERROR] Rate Limiter ошибка: {e}")
         raise RuntimeError(f"Rate Limiter initialization failed: {e}")
 
     # Usage Analytics
@@ -356,16 +356,16 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
             redis_client=redis_client.redis if redis_client else None,
             config=config.get("analytics", {}),
         )
-        logger.info("✅ Usage Analytics настроен")
+        logger.info("[OK] Usage Analytics настроен")
     except Exception as e:
         warnings.append(f"Usage Analytics initialization failed: {e}")
-        logger.warning(f"⚠️ Usage Analytics ошибка: {e}")
+        logger.warning(f"[WARN] Usage Analytics ошибка: {e}")
         logger.exception("Usage Analytics exception details:")
         # Создаем фиктивный analytics для продолжения работы
         usage_analytics = None
 
     # === SPAM DETECTION SETUP ===
-    logger.info("🎯 Настройка spam detection...")
+    logger.info("[TARGET] Настройка spam detection...")
 
     # Ensemble Detector
     try:
@@ -382,12 +382,12 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         # RUSpam детектор
         ensemble_detector.add_ruspam_detector()
 
-        logger.info("✅ Ensemble Detector настроен")
+        logger.info("[OK] Ensemble Detector настроен")
     except Exception as e:
         raise RuntimeError(f"Ensemble Detector initialization failed: {e}")
 
     # === USE CASES ===
-    logger.info("📋 Настройка use cases...")
+    logger.info("[LIST] Настройка use cases...")
 
     try:
         manage_api_keys_usecase = ManageApiKeysUseCase(
@@ -416,7 +416,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
             user_repo=user_repo, message_repo=message_repo, telegram_gateway=telegram_gateway
         )
 
-        logger.info("✅ Use cases настроены")
+        logger.info("[OK] Use cases настроены")
     except Exception as e:
         raise RuntimeError(f"Use cases initialization failed: {e}")
 
@@ -425,7 +425,7 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
 
     try:
         # API Auth Middleware создается в app.py для избежания циклических импортов
-        logger.info("✅ Middleware настроен")
+        logger.info("[OK] Middleware настроен")
     except Exception as e:
         raise RuntimeError(f"Middleware initialization failed: {e}")
 
@@ -460,43 +460,43 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
             http_client=http_client,
         )
 
-        logger.info("✅ Контейнер сервисов создан")
+        logger.info("[OK] Контейнер сервисов создан")
     except Exception as e:
         raise RuntimeError(f"Services container creation failed: {e}")
 
     # === ФИНАЛЬНАЯ ПРОВЕРКА ===
-    logger.info("🔍 Проверка готовности системы...")
+    logger.info("[SEARCH] Проверка готовности системы...")
 
     try:
         health = await services.health_check()
 
         if health["status"] == "healthy":
-            logger.info("✅ Все production сервисы готовы!")
-            logger.info("📊 Статус компонентов:")
+            logger.info("[OK] Все production сервисы готовы!")
+            logger.info("[STATS] Статус компонентов:")
             for service_name, service_health in health["services"].items():
-                status_emoji = "✅" if service_health.get("status") == "healthy" else "⚠️"
+                status_emoji = "[OK]" if service_health.get("status") == "healthy" else "[WARN]"
                 logger.info(
                     f"   {status_emoji} {service_name}: {service_health.get('status', 'unknown')}"
                 )
         elif health["status"] == "degraded":
-            logger.warning("⚠️ Система работает в деградированном режиме")
-            logger.warning("📊 Статус компонентов:")
+            logger.warning("[WARN] Система работает в деградированном режиме")
+            logger.warning("[STATS] Статус компонентов:")
             for service_name, service_health in health["services"].items():
                 if service_health.get("status") != "healthy":
                     logger.warning(
-                        f"   ⚠️ {service_name}: {service_health.get('status')} - {service_health.get('error', '')}"
+                        f"   [WARN] {service_name}: {service_health.get('status')} - {service_health.get('error', '')}"
                     )
         else:
             error_msg = f"System health check failed: {health.get('error')}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"[ERROR] {error_msg}")
             raise RuntimeError(error_msg)
     except Exception as e:
-        logger.error(f"❌ Health check failed: {e}")
+        logger.error(f"[ERROR] Health check failed: {e}")
         raise RuntimeError(f"Health check failed: {e}")
 
     # Выводим предупреждения
     if warnings:
-        logger.warning("⚠️ Предупреждения инициализации:")
+        logger.warning("[WARN] Предупреждения инициализации:")
         for warning in warnings:
             logger.warning(f"  - {warning}")
 
@@ -504,9 +504,9 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     try:
         await create_default_api_key_if_needed(services)
     except Exception as e:
-        logger.warning(f"⚠️ Не удалось создать дефолтный API ключ: {e}")
+        logger.warning(f"[WARN] Не удалось создать дефолтный API ключ: {e}")
 
-    logger.info("🎉 Production services setup завершен!")
+    logger.info("[SUCCESS] Production services setup завершен!")
     return services
 
 
@@ -522,15 +522,15 @@ def integrate_with_fastapi_app(app, services: ProductionServices, config: Dict[s
         services: Настроенные production сервисы
         config: Конфигурация
     """
-    logger.info("🔌 Интеграция с FastAPI...")
+    logger.info("[CONNECT] Интеграция с FastAPI...")
 
     # === MIDDLEWARE ===
     # Добавляем API Auth Middleware
     try:
         # Middleware добавляется в app.py
-        logger.info("✅ API Auth Middleware добавлен")
+        logger.info("[OK] API Auth Middleware добавлен")
     except Exception as e:
-        logger.error(f"❌ Ошибка добавления middleware: {e}")
+        logger.error(f"[ERROR] Ошибка добавления middleware: {e}")
         raise RuntimeError(f"Middleware integration failed: {e}")
 
     # === DEPENDENCY INJECTION ===
@@ -547,18 +547,18 @@ def integrate_with_fastapi_app(app, services: ProductionServices, config: Dict[s
     app.state.get_check_message_usecase = lambda: services.check_message_usecase
     app.state.get_ensemble_detector = lambda: services.ensemble_detector
 
-    logger.info("✅ Dependency injection настроен")
+    logger.info("[OK] Dependency injection настроен")
 
     # === STARTUP/SHUTDOWN HOOKS ===
     @app.on_event("startup")
     async def startup_event():
-        logger.info("🚀 FastAPI приложение запущено")
-        logger.info("📊 Production services активны")
+        logger.info("[START] FastAPI приложение запущено")
+        logger.info("[STATS] Production services активны")
 
         # Финальная проверка
         health = await services.health_check()
         if health["status"] not in ["healthy", "degraded"]:
-            logger.error(f"❌ System не готова: {health}")
+            logger.error(f"[ERROR] System не готова: {health}")
             raise RuntimeError("System health check failed on startup")
 
     @app.on_event("shutdown")
@@ -566,9 +566,9 @@ def integrate_with_fastapi_app(app, services: ProductionServices, config: Dict[s
         logger.info("🛑 Завершение работы FastAPI...")
 
         # Graceful shutdown уже обрабатывается в main shutdown_application
-        logger.info("✅ FastAPI shutdown hooks выполнены")
+        logger.info("[OK] FastAPI shutdown hooks выполнены")
 
-    logger.info("✅ FastAPI интеграция завершена")
+    logger.info("[OK] FastAPI интеграция завершена")
 
 
 # === HELPER FUNCTIONS FOR ROUTES ===
@@ -637,7 +637,7 @@ def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
     Raises:
         ValueError: Если конфигурация невалидна для production
     """
-    logger.info("🔍 Валидация production конфигурации...")
+    logger.info("[SEARCH] Валидация production конфигурации...")
 
     errors = []
     warnings = []
@@ -662,13 +662,19 @@ def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
                 errors.append(f"Обязательный параметр '{key}' не задан")
 
     # === JWT НАСТРОЙКИ ===
+    environment = config.get("environment", "development")
     jwt_config = config.get("api", {}).get("auth", {})
     jwt_secret = jwt_config.get("jwt_secret")
 
-    if not jwt_secret:
-        errors.append("JWT_SECRET обязателен для production")
-    elif len(jwt_secret) < 32:
-        errors.append("JWT_SECRET должен быть минимум 32 символа")
+    # JWT только обязателен в production
+    if environment == "production":
+        if not jwt_secret:
+            errors.append("JWT_SECRET обязателен для production")
+        elif len(jwt_secret) < 32:
+            errors.append("JWT_SECRET должен быть минимум 32 символа")
+    elif jwt_secret and len(jwt_secret) < 32:
+        # В development проверяем длину только если он задан
+        warnings.append("JWT_SECRET слишком короткий (рекомендуется минимум 32 символа)")
 
     # === SECURITY VALIDATION ===
 
@@ -733,15 +739,15 @@ def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     if errors:
         error_msg = "; ".join(errors)
-        logger.error(f"❌ Ошибки конфигурации: {error_msg}")
+        logger.error(f"[ERROR] Ошибки конфигурации: {error_msg}")
         raise ValueError(f"Configuration validation failed: {error_msg}")
 
     if warnings:
-        logger.warning("⚠️ Предупреждения конфигурации:")
+        logger.warning("[WARN] Предупреждения конфигурации:")
         for warning in warnings:
             logger.warning(f"  - {warning}")
 
-    logger.info("✅ Конфигурация валидна для production")
+    logger.info("[OK] Конфигурация валидна для production")
     return config
 
 
@@ -766,12 +772,12 @@ async def create_default_api_key_if_needed(services: ProductionServices):
             # Создаем через use case
             result = await services.manage_api_keys_usecase.create_api_key(create_request)
 
-            logger.info(f"✅ Дефолтный API ключ создан: {result.raw_key[:16]}...")
-            logger.info("🔐 ВАЖНО: Сохраните этот ключ в безопасном месте!")
+            logger.info(f"[OK] Дефолтный API ключ создан: {result.raw_key[:16]}...")
+            logger.info("[AUTH] ВАЖНО: Сохраните этот ключ в безопасном месте!")
             logger.info(f"🔑 Полный ключ: {result.raw_key}")
 
     except Exception as e:
-        logger.warning(f"⚠️ Не удалось создать дефолтный API ключ: {e}")
+        logger.warning(f"[WARN] Не удалось создать дефолтный API ключ: {e}")
 
 
 # === EXAMPLE USAGE & TESTING ===
@@ -836,11 +842,11 @@ async def example_production_setup():
         # Настраиваем production сервисы
         services = await setup_production_services(validated_config)
 
-        logger.info("🎉 Production setup завершен успешно!")
+        logger.info("[SUCCESS] Production setup завершен успешно!")
         return services, validated_config
 
     except Exception as e:
-        logger.error(f"❌ Production setup failed: {e}")
+        logger.error(f"[ERROR] Production setup failed: {e}")
         raise
 
 

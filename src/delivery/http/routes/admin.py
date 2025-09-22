@@ -22,7 +22,7 @@ class SpamSampleCreate(BaseModel):
     tags: List[str] = Field(default=[], description="Теги для классификации")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "text": "🔥🔥🔥 ЗАРАБОТОК! Детали в ЛС!",
                 "type": "spam",

@@ -238,25 +238,23 @@ def create_app(config: Dict[str, Any] = None, dependencies: Dict[str, Any] = Non
     async def health_check():
         """Проверка состояния API"""
         try:
-            dependencies = app.state.dependencies
-            spam_detector = dependencies.get("spam_detector")
-
-            if spam_detector:
-                health = await spam_detector.health_check()
+            # Получаем production services
+            if hasattr(app.state, "production_services"):
+                services = app.state.production_services
+                health = await services.health_check()
                 return {
-                    "status": "healthy",
-                    "timestamp": time.time(),
-                    "version": "2.0.0",
+                    "status": health["status"],
+                    "timestamp": health["timestamp"],
+                    "version": health["version"],
                     "api": {"public_endpoints": 4, "admin_endpoints": 8, "auth_endpoints": 6},
-                    "detectors": health.get("detectors", {}),
-                    "services": "operational",
+                    "services": health["services"],
                 }
             else:
                 return {
                     "status": "degraded",
                     "timestamp": time.time(),
                     "version": "2.0.0",
-                    "message": "Spam detector not available",
+                    "message": "Production services not available",
                 }
         except Exception as e:
             return JSONResponse(

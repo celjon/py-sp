@@ -293,5 +293,5 @@ class ApiKeyRepository:
             updated_at=row["updated_at"],
             last_used_at=row["last_used_at"],
             expires_at=row["expires_at"],
-            is_active=row["is_active"],
+            is_active=row["status"] == "active",
         )

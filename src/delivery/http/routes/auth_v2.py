@@ -33,7 +33,7 @@ class TokenRequest(BaseModel):
     api_key: str = Field(..., description="API ключ для аутентификации")
 
     class Config:
-        schema_extra = {"example": {"api_key": "antispam_your_api_key_here"}}
+        json_schema_extra = {"example": {"api_key": "antispam_your_api_key_here"}}
 
 
 class TokenResponse(BaseModel):
@@ -95,7 +95,7 @@ class CreateApiKeyRequestV2(BaseModel):
         return v
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "client_name": "My Awesome Bot",
                 "contact_email": "developer@company.com",

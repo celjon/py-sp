@@ -1,7 +1,8 @@
-from typing import Optional
+from typing import Optional, List
 import aiogram
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.types import ChatMember
 
 
 class TelegramGateway:
@@ -48,6 +49,33 @@ class TelegramGateway:
         except (TelegramBadRequest, TelegramForbiddenError) as e:
             print(f"Failed to delete message {message_id} in chat {chat_id}: {e}")
             return False
+
+    async def unban_user(self, chat_id: int, user_id: int, only_if_banned: bool = True) -> bool:
+        """Разбанить пользователя в чате"""
+        try:
+            await self.bot.unban_chat_member(
+                chat_id=chat_id, user_id=user_id, only_if_banned=only_if_banned
+            )
+            return True
+        except (TelegramBadRequest, TelegramForbiddenError) as e:
+            print(f"Failed to unban user {user_id} in chat {chat_id}: {e}")
+            return False
+
+    async def get_chat_member(self, chat_id: int, user_id: int) -> Optional[ChatMember]:
+        """Получить информацию о участнике чата"""
+        try:
+            return await self.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        except (TelegramBadRequest, TelegramForbiddenError) as e:
+            print(f"Failed to get chat member {user_id} in chat {chat_id}: {e}")
+            return None
+
+    async def get_chat_administrators(self, chat_id: int) -> List[ChatMember]:
+        """Получить список администраторов чата"""
+        try:
+            return await self.bot.get_chat_administrators(chat_id=chat_id)
+        except (TelegramBadRequest, TelegramForbiddenError) as e:
+            print(f"Failed to get chat administrators for chat {chat_id}: {e}")
+            return []
 
     async def send_message(self, chat_id: int, text: str, reply_to: Optional[int] = None) -> bool:
         """Отправить сообщение"""

@@ -14,6 +14,10 @@ class OpenAIGateway:
         self.temperature = config.get("temperature", 0.0)
         self.system_prompt = config.get("system_prompt", self._get_default_prompt())
 
+        # Health check cache
+        self._last_health_check = 0
+        self._last_health_status = {"status": "healthy", "model": self.model, "max_tokens": self.max_tokens}
+
     async def check_openai(
         self, text: str, user_context: Optional[Dict] = None
     ) -> Tuple[bool, float]:
@@ -140,17 +144,37 @@ User context:
 
     async def health_check(self) -> Dict[str, Any]:
         """Проверка здоровья OpenAI Gateway"""
-        try:
-            # Простая проверка доступности API
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": "test"}],
-                max_tokens=1,
-                temperature=0.0,
-            )
-            return {"status": "healthy", "model": self.model, "max_tokens": self.max_tokens}
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+        import time
+
+        current_time = time.time()
+
+        # Делаем полную проверку API только раз в час
+        if current_time - self._last_health_check > 3600:  # 1 час
+            try:
+                # Простая проверка доступности API
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": "test"}],
+                    max_tokens=1,
+                    temperature=0.0,
+                )
+                self._last_health_status = {
+                    "status": "healthy",
+                    "model": self.model,
+                    "max_tokens": self.max_tokens,
+                    "last_api_check": current_time
+                }
+                self._last_health_check = current_time
+            except Exception as e:
+                self._last_health_status = {
+                    "status": "error",
+                    "error": str(e),
+                    "last_api_check": current_time
+                }
+                self._last_health_check = current_time
+
+        # Возвращаем кешированный статус
+        return self._last_health_status
 
     def _get_default_prompt(self) -> str:
         return """Ты эксперт по определению спама в сообщениях чатов. Анализируй быстро и точно.

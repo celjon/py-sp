@@ -74,6 +74,55 @@ class UserRepository:
         async with self.db.acquire() as conn:
             await conn.execute(query, telegram_id)
 
+    async def is_user_banned(self, user_id: int, chat_id: int) -> bool:
+        """Проверить, забанен ли пользователь в чате"""
+        # Временная реализация - проверяем статус пользователя
+        # В будущем нужно создать таблицу banned_users с chat_id
+        user = await self.get_user(user_id)
+        if user and user.status == UserStatus.BANNED:
+            return True
+        return False
+
+    async def get_banned_users(self, chat_id: int) -> list:
+        """Получить список забаненных пользователей в чате"""
+        # Временная реализация - возвращаем всех забаненных пользователей
+        # В будущем нужно фильтровать по chat_id
+        query = """
+        SELECT telegram_id, username, first_name, last_name, created_at
+        FROM users WHERE status = $1
+        ORDER BY created_at DESC
+        """
+
+        async with self.db.acquire() as conn:
+            rows = await conn.fetch(query, UserStatus.BANNED.value)
+            return [
+                {
+                    "user_id": row["telegram_id"],
+                    "username": row["username"] or f"{row['first_name']} {row['last_name'] or ''}".strip(),
+                    "banned_at": row["created_at"].strftime("%Y-%m-%d %H:%M"),
+                    "ban_reason": "Spam detection",
+                    "last_message": "N/A"
+                }
+                for row in rows
+            ]
+
+    async def get_user_info(self, user_id: int) -> dict:
+        """Получить информацию о пользователе"""
+        user = await self.get_user(user_id)
+        if user:
+            return {
+                "username": user.username or f"{user.first_name} {user.last_name or ''}".strip(),
+                "status": user.status.value,
+                "message_count": user.message_count,
+                "spam_score": user.spam_score
+            }
+        return {"username": f"ID {user_id}", "status": "unknown"}
+
+    async def unban_user(self, user_id: int, chat_id: int) -> None:
+        """Разбанить пользователя"""
+        # Обновляем статус пользователя на ACTIVE
+        await self.update_user_status(user_id, UserStatus.ACTIVE)
+
     def _row_to_user(self, row: asyncpg.Record) -> User:
         """Преобразовать строку БД в объект User"""
         return User(

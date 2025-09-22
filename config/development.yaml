@@ -10,6 +10,8 @@ telegram:
   token: "${BOT_TOKEN}"
   admin_chat_id: "${ADMIN_CHAT_ID}"
   admin_users: ${ADMIN_USERS}
+  webhook_url: "${WEBHOOK_URL}"
+  ngrok_url: "${NGROK_URL}"
 
 # Современная детекция спама (БЕЗ устаревших heuristic и ml)
 spam_detection:

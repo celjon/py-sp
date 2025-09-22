@@ -44,7 +44,7 @@ class DetectionRequest(BaseModel):
         return v.strip()
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "text": "Привет! Хочешь заработать быстрые деньги? Пиши в ЛС!",
                 "context": {
@@ -65,7 +65,7 @@ class BatchDetectionRequest(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "messages": [
                     {
@@ -97,7 +97,7 @@ class DetectionResponse(BaseModel):
     api_version: str = Field("2.0", description="Версия API")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "is_spam": True,
                 "confidence": 0.85,
@@ -279,7 +279,7 @@ async def detect_spam(
     detection_id = f"det_{uuid.uuid4().hex[:16]}"
 
     logger.info(
-        f"🔍 Detection request {detection_id}: '{request_data.text[:50]}{'...' if len(request_data.text) > 50 else ''}'"
+        f"[SEARCH] Detection request {detection_id}: '{request_data.text[:50]}{'...' if len(request_data.text) > 50 else ''}'"
     )
 
     try:
@@ -412,7 +412,7 @@ async def batch_detect_spam(
 
     batch_id = f"batch_{uuid.uuid4().hex[:12]}"
 
-    logger.info(f"🔍 Batch detection {batch_id}: {len(request_data.messages)} сообщений")
+    logger.info(f"[SEARCH] Batch detection {batch_id}: {len(request_data.messages)} сообщений")
 
     try:
         results = []
@@ -493,7 +493,7 @@ async def batch_detect_spam(
 
             except Exception as e:
                 # Обработка ошибки отдельного сообщения
-                logger.error(f"❌ Batch message {i} error: {e}")
+                logger.error(f"[ERROR] Batch message {i} error: {e}")
 
                 detection_time_ms = (time.time() - detection_start) * 1000
                 detection_times.append(detection_time_ms)
@@ -546,7 +546,7 @@ async def batch_detect_spam(
         )
 
         logger.info(
-            f"✅ Batch detection {batch_id} завершен: {spam_count}/{len(request_data.messages)} спам, время={total_processing_time_ms:.1f}ms"
+            f"[OK] Batch detection {batch_id} завершен: {spam_count}/{len(request_data.messages)} спам, время={total_processing_time_ms:.1f}ms"
         )
 
         return BatchDetectionResponse(
@@ -599,7 +599,7 @@ async def get_usage_stats(
     try:
         api_key = get_authenticated_api_key(request)
 
-        logger.info(f"📊 Запрос статистики для API key {api_key.id} за {hours} часов")
+        logger.info(f"[STATS] Запрос статистики для API key {api_key.id} за {hours} часов")
 
         # Получаем метрики использования
         try:
