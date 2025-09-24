@@ -1,44 +1,92 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-@router.message(Command("ban"), F.chat.type.in_({"group", "supergroup"}))
+# DEBUG HANDLER УДАЛЕН - он блокировал выполнение команд
+# @router.message(F.chat.type.in_({"group", "supergroup"}))
+# async def debug_group_messages(message: types.Message, **kwargs):
+#     """Отладочный хендлер - ловит ВСЕ сообщения в группах"""
+#     if message.text and message.text.startswith('/'):
+#         print(f"[GROUP DEBUG] 🔍 Команда в группе: {message.text} от {message.from_user.id}")
+#         print(f"[GROUP DEBUG] 🔍 Chat: {message.chat.id} ({message.chat.title})")
+#     # Не блокируем дальнейшую обработку - просто логируем
+
+
+@router.message(Command("ban"), F.chat.type.in_({"group", "channel"}))
 async def cmd_ban(message: types.Message, **kwargs):
     """Команда для принудительного бана пользователя"""
+    logger.info(f"[DEBUG] ✅ ADMIN HANDLER ВЫЗВАН! /ban от {message.from_user.id} в {message.chat.type}")
+    logger.info(f"[DEBUG] reply_to_message: {message.reply_to_message is not None}")
+    print(f"[ADMIN PRINT] Handler вызван! /ban от {message.from_user.id} в {message.chat.type}")
+    print(f"[GROUP TEST] 🔥 СООБЩЕНИЕ ИЗ ГРУППЫ ДОШЛО ДО ХЕНДЛЕРА! Chat ID: {message.chat.id}")
+    logger.info(f"[ADMIN] ========= ПОЛУЧЕНА КОМАНДА /BAN =========")
+    logger.info(f"[ADMIN] Отправитель команды: {message.from_user.id} (@{message.from_user.username})")
+    logger.info(f"[ADMIN] Чат: {message.chat.id} ({message.chat.type})")
+    logger.info(f"[ADMIN] kwargs: {list(kwargs.keys())}")
+
+    # Проверяем reply_to_message
     if not message.reply_to_message:
+        logger.warning(f"[ADMIN] ❌ Команда /ban без ответа на сообщение")
         await message.reply("Используйте эту команду в ответ на сообщение пользователя")
         return
 
+    target_user_id = message.reply_to_message.from_user.id
+    target_username = message.reply_to_message.from_user.username or "без username"
+    target_message = message.reply_to_message.text or "медиа сообщение"
+
+    logger.info(f"[ADMIN] Цель бана: {target_user_id} (@{target_username})")
+    logger.info(f"[ADMIN] Сообщение цели: '{target_message[:100]}{'...' if len(target_message) > 100 else ''}'")
+
     deps: Dict[str, Any] = kwargs.get("deps", {})
+    logger.info(f"[ADMIN] Доступные deps: {list(deps.keys()) if deps else 'НЕТ DEPS!'}")
+    logger.info(f"[ADMIN] kwargs keys: {list(kwargs.keys())}")
+
     ban_user_usecase = deps.get("ban_user_usecase")
 
     if not ban_user_usecase:
+        logger.error(f"[ADMIN] ❌ ban_user_usecase не найден в deps!")
+        logger.error(f"[ADMIN] ❌ deps содержимое: {deps}")
         await message.reply("❌ Ошибка: сервис недоступен")
         return
 
+    logger.info(f"[ADMIN] ban_user_usecase найден: {type(ban_user_usecase)}")
+
     # Создаем фиктивный результат детекции для принудительного бана
-    from ....domain.entity.detection_result import DetectionResult, DetectionReason
+    try:
+        from ....domain.entity.detection_result import DetectionResult, DetectionReason
 
-    detection_result = DetectionResult(
-        message_id=message.reply_to_message.message_id,
-        user_id=message.reply_to_message.from_user.id,
-        is_spam=True,
-        overall_confidence=1.0,
-        primary_reason=DetectionReason.ADMIN_REPORTED,
-        detector_results=[],
-        should_ban=True,
-        should_delete=True,
-    )
+        detection_result = DetectionResult(
+            message_id=message.reply_to_message.message_id,
+            user_id=target_user_id,  # ИСПРАВЛЕНО: используем target_user_id
+            is_spam=True,
+            overall_confidence=1.0,
+            primary_reason=DetectionReason.ADMIN_REPORTED,
+            detector_results=[],
+            should_ban=True,
+            should_delete=True,
+        )
 
-    ban_result = await ban_user_usecase.execute(
-        chat_id=message.chat.id,
-        user_id=message.reply_to_message.from_user.id,
-        detection_result=detection_result,
-        ban_type="permanent",
-    )
+        logger.info(f"[ADMIN] Вызываем ban_user_usecase.execute для пользователя {target_user_id}")
+
+        ban_result = await ban_user_usecase.execute(
+            chat_id=message.chat.id,
+            user_id=target_user_id,  # ИСПРАВЛЕНО: используем target_user_id
+            detection_result=detection_result,
+            ban_type="permanent",
+            require_user_in_db=False,  # Для админских команд не требуем существования в БД
+        )
+
+        logger.info(f"[ADMIN] ban_user_usecase.execute завершен: {ban_result}")
+    except Exception as e:
+        logger.error(f"[ADMIN] ❌ Ошибка при создании detection_result или вызове usecase: {e}")
+        await message.reply(f"❌ Ошибка выполнения бана: {e}")
+        return
 
     if ban_result["banned"]:
         # Сохраняем информацию о бане в БД для последующего просмотра
@@ -72,7 +120,7 @@ async def cmd_ban(message: types.Message, **kwargs):
         pass  # Игнорируем ошибки удаления
 
 
-@router.message(Command("approve"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("approve"), F.chat.type.in_({"group", "channel"}))
 async def cmd_approve(message: types.Message, **kwargs):
     """Команда для одобрения АКТИВНОГО пользователя (добавление в белый список)"""
     if not message.reply_to_message:
@@ -134,7 +182,7 @@ async def cmd_approve(message: types.Message, **kwargs):
             pass
 
 
-@router.message(Command("spam"), F.chat.type.in_({"group", "supergroup"}))
+@router.message(Command("spam"), F.chat.type.in_({"group", "channel"}))
 async def cmd_mark_spam(message: types.Message, **kwargs):
     """Команда для добавления сообщения в образцы спама"""
     if not message.reply_to_message or not message.reply_to_message.text:
@@ -181,6 +229,110 @@ async def cmd_mark_spam(message: types.Message, **kwargs):
             pass
 
 
+@router.message(Command("spamstats"), F.chat.type == "private")
+async def cmd_spamstats(message: types.Message, **kwargs):
+    """Показать статистику спама пользователя (только в приватном чате)"""
+    deps: Dict[str, Any] = kwargs.get("deps", {})
+    user_repo = deps.get("user_repository")
+
+    if not user_repo:
+        await message.reply("❌ Статистика недоступна")
+        return
+
+    # Парсим аргументы команды
+    args = message.text.split()[1:] if message.text else []
+
+    if not args:
+        await message.reply(
+            "📊 <b>Статистика спама пользователя</b>\n\n"
+            "Использование:\n"
+            "/spamstats &lt;user_id&gt;\n\n"
+            "Пример:\n"
+            "/spamstats 123456789\n\n"
+            "Показывает количество спам-сообщений пользователя за сегодня.",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        user_id = int(args[0])
+
+        # Получаем информацию о пользователе
+        user_info = await user_repo.get_user_info(user_id)
+        daily_spam_count = await user_repo.get_daily_spam_count(user_id)
+
+        username = user_info.get("username", f"ID {user_id}") if user_info else f"ID {user_id}"
+
+        stats_text = f"""
+📊 <b>Статистика спама пользователя</b>
+
+👤 Пользователь: {username}
+🆔 ID: <code>{user_id}</code>
+
+🚨 <b>Спам за сегодня:</b> {daily_spam_count}
+⚠️ <b>Лимит:</b> 3 сообщения в день
+
+{"🔴 ПРЕВЫШЕН ЛИМИТ!" if daily_spam_count >= 3 else "🟢 В пределах нормы"}
+        """
+
+        await message.reply(stats_text, parse_mode="HTML")
+
+    except ValueError:
+        await message.reply("❌ Неправильный формат user_id")
+    except Exception as e:
+        await message.reply(f"❌ Ошибка получения статистики: {str(e)}")
+
+
+@router.message(Command("resetspam"), F.chat.type == "private")
+async def cmd_reset_spam(message: types.Message, **kwargs):
+    """Сбросить счетчик спама пользователя (только в приватном чате)"""
+    deps: Dict[str, Any] = kwargs.get("deps", {})
+    user_repo = deps.get("user_repository")
+
+    if not user_repo:
+        await message.reply("❌ Сервис недоступен")
+        return
+
+    # Парсим аргументы команды
+    args = message.text.split()[1:] if message.text else []
+
+    if not args:
+        await message.reply(
+            "🔄 <b>Сброс счетчика спама</b>\n\n"
+            "Использование:\n"
+            "/resetspam &lt;user_id&gt;\n\n"
+            "Пример:\n"
+            "/resetspam 123456789\n\n"
+            "Сбрасывает счетчик спам-сообщений пользователя за сегодня.",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        user_id = int(args[0])
+
+        # Получаем информацию о пользователе
+        user_info = await user_repo.get_user_info(user_id)
+        username = user_info.get("username", f"ID {user_id}") if user_info else f"ID {user_id}"
+
+        # Сбрасываем счетчик спама
+        await user_repo.reset_daily_spam_count(user_id)
+
+        response_text = (
+            f"🔄 <b>Счетчик спама сброшен</b>\n\n"
+            f"👤 Пользователь: {username}\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"✅ Счетчик спама за сегодня сброшен"
+        )
+
+        await message.reply(response_text, parse_mode="HTML")
+
+    except ValueError:
+        await message.reply("❌ Неправильный формат user_id")
+    except Exception as e:
+        await message.reply(f"❌ Ошибка сброса счетчика: {str(e)}")
+
+
 @router.message(Command("stats"), F.chat.type == "private")
 async def cmd_stats(message: types.Message, **kwargs):
     """Показать статистику чата (только в приватном чате)"""
@@ -198,11 +350,12 @@ async def cmd_stats(message: types.Message, **kwargs):
         await message.reply(
             "📊 <b>Команда статистики</b>\n\n"
             "Использование:\n"
-            "/stats <chat_id> [hours]\n\n"
+            "/stats &lt;chat_id&gt; [hours]\n\n"
             "Примеры:\n"
             "/stats -1001234567890 24\n"
             "/stats -1001234567890\n\n"
-            "По умолчанию показывается статистика за 24 часа."
+            "По умолчанию показывается статистика за 24 часа.",
+            parse_mode="HTML"
         )
         return
 

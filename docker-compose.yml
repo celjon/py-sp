@@ -40,23 +40,19 @@ services:
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - BOT_TOKEN=${BOT_TOKEN}
-      - ADMIN_CHAT_ID=${ADMIN_CHAT_ID}
       - ADMIN_USERS=${ADMIN_USERS}
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - CAS_API_URL=${CAS_API_URL}
-      - JWT_SECRET=${JWT_SECRET}
-      - API_SECRET_KEY=${API_SECRET_KEY}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - RUN_MODE=${RUN_MODE:-telegram}
+      - RUN_MODE=${RUN_MODE:-both}
     ports:
       - "8080:8080"
     volumes:
       - ./logs:/app/logs
       - ./models:/app/models
     restart: unless-stopped
-    command: ["python", "run_bot.py"]
+    command: ["python", "-m", "src.main"]
 
   # Nginx для проксирования (опционально)
   nginx:

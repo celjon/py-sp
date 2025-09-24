@@ -25,10 +25,11 @@ spam_detection:
     ruspam_min_length: 15        # Длиннее тексты для анализа
     russian_threshold: 0.4       # Строже определение русского
     
-    # OpenAI настройки
-    openai_min_length: 10        # Длиннее тексты для LLM
-    use_openai_fallback: true
-    openai_timeout: 3.0          # Меньше таймаут
+    # BotHub настройки (заменяет OpenRouter)
+    bothub_min_length: 10        # Длиннее тексты для LLM
+    use_bothub_fallback: true
+    bothub_timeout: 3.0          # Меньше таймаут
+    bothub_min_ruspam_confidence: 0.2  # Минимальная уверенность RUSpam для вызова BotHub
 
 # RUSpam production
 ruspam:
@@ -37,13 +38,17 @@ ruspam:
   cache_results: true
   cache_ttl: 1800               # 30 минут
 
-# OpenAI production
-openai:
-  api_key: "${OPENAI_API_KEY}"
-  model: "gpt-4o-mini"
-  max_tokens: 100               # Меньше токенов = быстрее
+# OpenAI и OpenRouter полностью удалены - используем только BotHub
+
+# BotHub production (новый провайдер)
+bothub:
+  model: "gpt-4o-mini"  # Модель по умолчанию
+  max_tokens: 150
   temperature: 0.0
-  enabled: true
+  # Дополнительные настройки
+  timeout: 3.0
+  max_retries: 1
+  retry_delay: 1.0
 
 # Внешние API production
 external_apis:
@@ -107,6 +112,11 @@ performance:
   detection_timeout: 1.5       # Быстрее таймаут
   cache_detection_results: 600 # 10 минут кэш
   rate_limit_per_user: 10      # Строже лимиты пользователей
+
+# Биллинг OpenRouter (production)
+openrouter_billing:
+  retention_days: 365          # Храним данные год
+  enable_redis_cache: true
 
 # Production безопасность
 security:

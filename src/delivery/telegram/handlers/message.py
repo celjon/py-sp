@@ -27,9 +27,11 @@ async def cmd_help(message: types.Message):
 /help - Показать это сообщение
 
 <b>Управление (в личном чате с ботом):</b>
-/stats <chat_id> [hours] - Статистика чата
-/banned <chat_id> - Список забаненных пользователей
-/unban <user_id> <chat_id> - Разбанить пользователя
+/stats &lt;chat_id&gt; [hours] - Статистика чата
+/banned &lt;chat_id&gt; - Список забаненных пользователей
+/unban &lt;user_id&gt; &lt;chat_id&gt; - Разбанить пользователя
+/spamstats &lt;user_id&gt; - Статистика спама пользователя
+/resetspam &lt;user_id&gt; - Сбросить счетчик спама
 
 <b>Админ команды (в группах):</b>
 /ban - Забанить пользователя (ответ на сообщение)
@@ -43,7 +45,7 @@ async def cmd_help(message: types.Message):
 
 🔒 Все админские команды требуют прав администратора
     """
-    await message.reply(help_text)
+    await message.reply(help_text, parse_mode="HTML")
 
 
 @router.message(Command("banned"), F.chat.type == "private")
@@ -63,10 +65,11 @@ async def cmd_banned(message: types.Message, **kwargs):
         await message.reply(
             "📋 <b>Просмотр забаненных пользователей</b>\n\n"
             "Использование:\n"
-            "/banned <chat_id>\n\n"
+            "/banned &lt;chat_id&gt;\n\n"
             "Пример:\n"
             "/banned -1001234567890\n\n"
-            "Показывает всех забаненных пользователей в указанном чате."
+            "Показывает всех забаненных пользователей в указанном чате.",
+            parse_mode="HTML"
         )
         return
 
@@ -133,10 +136,11 @@ async def cmd_unban(message: types.Message, **kwargs):
         await message.reply(
             "🔓 <b>Разбан пользователя</b>\n\n"
             "Использование:\n"
-            "/unban <user_id> <chat_id>\n\n"
+            "/unban &lt;user_id&gt; &lt;chat_id&gt;\n\n"
             "Пример:\n"
             "/unban 123456789 -1001234567890\n\n"
-            "Разбанивает пользователя в указанном чате и добавляет в белый список."
+            "Разбанивает пользователя в указанном чате и добавляет в белый список.",
+            parse_mode="HTML"
         )
         return
 
@@ -227,7 +231,20 @@ async def handle_new_members(message: types.Message, **kwargs):
                     print(f"❌ Не удалось перебанить пользователя {user_id}: {e}")
 
             else:
-                # Пользователь не забанен - просто логируем
+                # Пользователь не забанен - создаем его в БД если не существует
+                existing_user = await user_repo.get_user(user_id)
+                if not existing_user:
+                    try:
+                        await user_repo.create_user(
+                            telegram_id=user_id,
+                            username=new_member.username,
+                            first_name=new_member.first_name,
+                            last_name=new_member.last_name
+                        )
+                        print(f"✅ Создан новый пользователь в БД: {username} ({user_id})")
+                    except Exception as e:
+                        print(f"❌ Ошибка создания пользователя {user_id}: {e}")
+                
                 print(
                     f"👋 Новый участник: {username} ({user_id}) присоединился к чату {message.chat.id}"
                 )
@@ -254,9 +271,10 @@ async def handle_left_member(message: types.Message, **kwargs):
     # Можно добавить логику для очистки данных пользователя или статистики
 
 
-@router.message(F.chat.type.in_({"group", "supergroup"}))
+@router.message(F.chat.type.in_({"group", "channel"}) & ~F.text.startswith('/'))
 async def handle_group_message(message: types.Message, **kwargs):
-    """Основной обработчик сообщений в группах"""
+    """Основной обработчик сообщений в группах (исключая команды)"""
+
     deps: Dict[str, Any] = kwargs.get("deps", {})
 
     # Получаем use case для проверки сообщений
@@ -273,6 +291,9 @@ async def handle_group_message(message: types.Message, **kwargs):
         user_id=message.from_user.id,
         chat_id=message.chat.id,
         text=message.text or "",
+        username=message.from_user.username,
+        first_name=message.from_user.first_name,
+        last_name=message.from_user.last_name,
         has_links="http" in (message.text or "").lower(),
         has_mentions="@" in (message.text or ""),
         has_images=bool(message.photo or message.sticker),

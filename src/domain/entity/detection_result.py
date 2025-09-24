@@ -15,9 +15,9 @@ class DetectionReason(Enum):
     RUSPAM_DETECTED = "ruspam_detected"  # RUSpam обнаружил спам
     RUSPAM_CLEAN = "ruspam_clean"  # RUSpam определил как чистое
 
-    # OpenAI LLM детектор
-    OPENAI_DETECTED = "openai_detected"  # Обнаружено OpenAI
-    OPENAI_CLEAN = "openai_clean"  # OpenAI определил как чистое
+    # BotHub LLM детектор
+    BOTHUB_DETECTED = "bothub_detected"  # Обнаружено BotHub
+    BOTHUB_CLEAN = "bothub_clean"  # BotHub определил как чистое
 
     # Административные действия
     ADMIN_REPORTED = "admin_reported"  # Помечено админом
@@ -34,7 +34,7 @@ class DetectorResult:
     processing_time_ms: float = 0.0
     error: Optional[str] = None
     token_usage: Optional[Dict[str, int]] = (
-        None  # Для OpenAI: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        None  # Для BotHub: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     )
 
 

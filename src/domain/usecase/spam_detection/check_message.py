@@ -4,6 +4,8 @@ from ...entity.message import Message
 from ...entity.user import User
 from ...entity.detection_result import DetectionResult
 from ...service.detector.ensemble import EnsembleDetector
+from ....adapter.gateway.bothub_gateway import BotHubGateway
+from ...service.detector.bothub import BotHubDetector
 
 
 class MessageRepository(Protocol):
@@ -27,11 +29,13 @@ class CheckMessageUseCase:
         user_repo: UserRepository,
         spam_detector: EnsembleDetector,
         spam_threshold: float = 0.6,
+        max_daily_spam: int = 3,
     ):
         self.message_repo = message_repo
         self.user_repo = user_repo
         self.spam_detector = spam_detector
         self.spam_threshold = spam_threshold
+        self.max_daily_spam = max_daily_spam
 
     async def execute(self, message: Message) -> DetectionResult:
         start_time = time.time()
@@ -39,7 +43,13 @@ class CheckMessageUseCase:
         # Пользователь и контекст
         user = await self.user_repo.get_user(message.user_id)
         if not user:
-            user = User(id=0, telegram_id=message.user_id, message_count=0, spam_score=0.0)
+            # Создаем нового пользователя в БД при первом сообщении
+            user = await self.user_repo.create_user(
+                telegram_id=message.user_id,
+                username=message.username,
+                first_name=message.first_name,
+                last_name=message.last_name
+            )
 
         if await self.user_repo.is_user_approved(message.user_id):
             result = DetectionResult(
@@ -62,6 +72,24 @@ class CheckMessageUseCase:
             "chat_id": getattr(message, "chat_id", None),
         }
 
+        # Настраиваем BotHub детектор если у пользователя есть токен
+        if user.bothub_token and user.bothub_configured:
+            try:
+                # Создаем BotHub Gateway с токеном пользователя
+                bothub_gateway = BotHubGateway(
+                    user_token=user.bothub_token,
+                    system_prompt=user.system_prompt
+                )
+                
+                # Создаем BotHub детектор
+                bothub_detector = BotHubDetector(bothub_gateway)
+                
+                # Добавляем в ensemble детектор
+                self.spam_detector.add_bothub_detector(bothub_gateway)
+            except Exception as e:
+                # Если не удалось настроить BotHub, продолжаем без него
+                pass
+
         # Ансамблевая детекция
         result = await self.spam_detector.detect(message, user_context)
 
@@ -80,6 +108,18 @@ class CheckMessageUseCase:
         new_message_count = user.message_count + 1
         new_spam_score = self._ema(user.spam_score, result.overall_confidence, 0.1)
         await self.user_repo.update_user_stats(message.user_id, new_message_count, new_spam_score)
+        
+        # Если сообщение определено как спам, увеличиваем счетчик
+        if result.is_spam:
+            daily_spam_count = await self.user_repo.increment_spam_count(message.user_id)
+            print(f"🚨 Spam detected! User {message.user_id} spam count: {daily_spam_count}")
+            
+            # Проверяем, нужно ли банить пользователя
+            if daily_spam_count >= self.max_daily_spam:
+                print(f"🔨 User {message.user_id} should be banned for {daily_spam_count} spam messages today")
+                # Устанавливаем флаги для бана
+                result.should_ban = True
+                result.should_delete = True
 
     def _ema(self, current_value: float, new_value: float, alpha: float) -> float:
         return current_value * (1 - alpha) + new_value * alpha

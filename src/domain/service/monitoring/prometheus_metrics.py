@@ -19,8 +19,16 @@ from prometheus_client import (
     CONTENT_TYPE_LATEST,
 )
 
-from ...entity.api_key import ApiKeyPlan
-from ...entity.client_usage import RequestStatus
+# API entities removed - using simple enums instead
+class ApiKeyPlan(Enum):
+    FREE = "free"
+    PREMIUM = "premium"
+    ENTERPRISE = "enterprise"
+
+class RequestStatus(Enum):
+    SUCCESS = "success"
+    ERROR = "error"
+    RATE_LIMITED = "rate_limited"
 
 
 class MetricType(Enum):

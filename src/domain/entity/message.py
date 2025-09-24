@@ -21,6 +21,11 @@ class Message:
     chat_id: int
     text: str
     role: MessageRole = MessageRole.USER
+    
+    # Информация о пользователе (для создания в БД)
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
     # Метаданные для детекции спама
     has_links: bool = False

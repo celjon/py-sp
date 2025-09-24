@@ -30,46 +30,42 @@ class RUSpamSimpleClassifier:
         self.is_loaded = False
         self.is_available = TRANSFORMERS_AVAILABLE
 
-        if TRANSFORMERS_AVAILABLE:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            print(f"✅ RUSpam доступен, устройство: {self.device}")
-        else:
-            print("❌ Transformers не установлен: pip install torch transformers")
+        if not TRANSFORMERS_AVAILABLE:
+            raise RuntimeError("❌ КРИТИЧЕСКАЯ ОШИБКА: Transformers не установлен! Выполните: pip install torch transformers")
 
-    async def _load_model(self):
-        """Загрузка модели RUSpam/spamNS_v1"""
-        if self.is_loaded or not self.is_available:
-            return
+        # Инициализируем устройство
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"[OK] RUSpam доступен, устройство: {self.device}")
 
+        # Загружаем модель сразу при инициализации
+        self._load_model_sync()
+
+    def _load_model_sync(self):
+        """Синхронная загрузка модели при инициализации"""
         try:
             print(f"📥 Загрузка RUSpam модели: {self.model_name}")
 
-            loop = asyncio.get_event_loop()
-
             # Загружаем токенизатор
-            self.tokenizer = await loop.run_in_executor(
-                None, AutoTokenizer.from_pretrained, self.model_name
-            )
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
             # Загружаем модель (spamNS_v1 - регрессионная, 1 выход)
-            def _load_model():
-                return (
-                    AutoModelForSequenceClassification.from_pretrained(
-                        self.model_name, num_labels=1, ignore_mismatched_sizes=True
-                    )
-                    .to(self.device)
-                    .eval()
+            self.model = (
+                AutoModelForSequenceClassification.from_pretrained(
+                    self.model_name, num_labels=1, ignore_mismatched_sizes=True
                 )
-
-            self.model = await loop.run_in_executor(None, _load_model)
+                .to(self.device)
+                .eval()
+            )
 
             self.is_loaded = True
-            print("✅ RUSpam модель загружена успешно")
+            print("[OK] RUSpam модель загружена успешно")
 
         except Exception as e:
-            print(f"❌ Ошибка загрузки RUSpam: {e}")
-            print("💡 Попробуйте: pip install torch transformers")
-            self.is_loaded = False
+            error_msg = f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось загрузить RUSpam модель: {e}"
+            print(error_msg)
+            print("💡 Проверьте подключение к интернету и доступность Hugging Face Hub")
+            raise RuntimeError(error_msg)
+
 
     def _clean_text(self, text: str) -> str:
         """Очистка текста для RUSpam модели"""
@@ -84,12 +80,6 @@ class RUSpamSimpleClassifier:
 
     async def classify(self, message: str) -> RUSpamResult:
         """Классификация сообщения на спам"""
-        if not self.is_available:
-            return RUSpamResult(is_spam=False, confidence=0.0, details="Transformers не установлен")
-
-        if not self.is_loaded:
-            await self._load_model()
-
         if not self.is_loaded:
             return RUSpamResult(is_spam=False, confidence=0.0, details="RUSpam модель не загружена")
 

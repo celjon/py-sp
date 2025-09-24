@@ -26,6 +26,10 @@ class User:
     # Статистика
     message_count: int = 0
     spam_score: float = 0.0
+    
+    # Счетчик спама с ежедневным сбросом
+    daily_spam_count: int = 0
+    last_spam_reset_date: Optional[datetime] = None
 
     # Временные метки
     first_message_at: Optional[datetime] = None
@@ -34,6 +38,11 @@ class User:
 
     # Флаги
     is_admin: bool = False
+
+    # BotHub настройки
+    bothub_token: Optional[str] = None
+    system_prompt: Optional[str] = None
+    bothub_configured: bool = False
 
     # Системные поля
     id: Optional[int] = None
@@ -70,6 +79,11 @@ class User:
         """Проверяет, ограничен ли пользователь"""
         return self.status == UserStatus.RESTRICTED
 
+    @property
+    def is_admin_or_owner(self) -> bool:
+        """Проверяет, является ли пользователь админом или владельцем"""
+        return self.is_admin
+
     def ban(self) -> None:
         """Банит пользователя"""
         self.status = UserStatus.BANNED
@@ -95,6 +109,36 @@ class User:
 
         if self.first_message_at is None:
             self.first_message_at = datetime.now()
+
+    def increment_spam_count(self) -> None:
+        """Увеличивает счетчик спама за день"""
+        self._check_and_reset_daily_counter()
+        self.daily_spam_count += 1
+
+    def reset_daily_spam_count(self) -> None:
+        """Сбрасывает счетчик спама за день"""
+        self.daily_spam_count = 0
+        self.last_spam_reset_date = datetime.now()
+
+    def _check_and_reset_daily_counter(self) -> None:
+        """Проверяет и сбрасывает счетчик если прошел день"""
+        now = datetime.now()
+        if self.last_spam_reset_date is None:
+            self.last_spam_reset_date = now
+            return
+        
+        # Сбрасываем если прошел день
+        if (now - self.last_spam_reset_date).days >= 1:
+            self.reset_daily_spam_count()
+
+    def get_daily_spam_count(self) -> int:
+        """Возвращает текущий счетчик спама за день"""
+        self._check_and_reset_daily_counter()
+        return self.daily_spam_count
+
+    def should_be_banned_for_spam(self, max_daily_spam: int = 3) -> bool:
+        """Проверяет, должен ли пользователь быть забанен за спам"""
+        return self.get_daily_spam_count() >= max_daily_spam
 
 
 @dataclass

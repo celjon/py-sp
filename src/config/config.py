@@ -1,6 +1,6 @@
 """
 Production конфигурационные классы
-Современная архитектура: CAS + RUSpam + OpenAI (БЕЗ эвристик и ML)
+Современная архитектура: CAS + RUSpam + BotHub (БЕЗ эвристик и ML)
 """
 
 import os
@@ -53,13 +53,16 @@ class RUSpamConfig:
 
 
 @dataclass
-class OpenAIConfig:
-    api_key: str
-    model: str
-    max_tokens: int
+class BotHubConfig:
+    """Конфигурация BotHub API"""
+    
+    # BotHub не требует глобального API ключа - используется токен пользователя
+    model: str = "gpt-4o-mini"
+    max_tokens: int = 150
     temperature: float = 0.0
-    enabled: bool = True
-    system_prompt: Optional[str] = None
+    timeout: float = 10.0
+    max_retries: int = 2
+    retry_delay: float = 1.0
 
 
 @dataclass
@@ -79,7 +82,7 @@ class Config:
     redis: RedisConfig
     telegram: TelegramConfig
     spam_detection: SpamDetectionConfig
-    openai: OpenAIConfig
+    bothub: BotHubConfig
     external_apis: Dict[str, Any]
     moderation: Dict[str, Any]
     logging: Dict[str, Any]
@@ -106,8 +109,8 @@ class Config:
         return self.redis.url
 
     @property
-    def openai_api_key(self) -> str:
-        return self.openai.api_key
+    def openrouter_api_key(self) -> str:
+        return self.openrouter.api_key
 
     @property
     def admin_chat_id(self) -> int:
@@ -185,15 +188,15 @@ def load_config(env: Optional[str] = None) -> Config:
         ruspam=config_data["spam_detection"].get("ruspam"),
     )
 
-    # OpenAI конфигурация
-    openai_data = config_data["openai"]
-    openai_config = OpenAIConfig(
-        api_key=openai_data["api_key"],
-        model=openai_data["model"],
-        max_tokens=openai_data["max_tokens"],
-        temperature=openai_data.get("temperature", 0.0),
-        enabled=openai_data.get("enabled", True),
-        system_prompt=openai_data.get("system_prompt"),
+    # BotHub конфигурация
+    bothub_data = config_data.get("bothub", {})
+    bothub_config = BotHubConfig(
+        model=bothub_data.get("model", "gpt-4o-mini"),
+        max_tokens=bothub_data.get("max_tokens", 150),
+        temperature=bothub_data.get("temperature", 0.0),
+        timeout=bothub_data.get("timeout", 10.0),
+        max_retries=bothub_data.get("max_retries", 2),
+        retry_delay=bothub_data.get("retry_delay", 1.0),
     )
 
     # RUSpam конфигурация (если есть)
@@ -211,7 +214,7 @@ def load_config(env: Optional[str] = None) -> Config:
         redis=redis_config,
         telegram=telegram_config,
         spam_detection=spam_detection_config,
-        openai=openai_config,
+        bothub=bothub_config,
         external_apis=config_data.get("external_apis", {}),
         moderation=config_data.get("moderation", {}),
         logging=config_data.get("logging", {}),
@@ -272,16 +275,17 @@ def _create_default_config() -> Config:
                 "auto_ban_threshold": 0.85,
                 "use_ruspam": True,
                 "ruspam_min_length": 10,
-                "openai_min_length": 5,
-                "use_openai_fallback": True,
+                "bothub_min_length": 5,
+                "use_bothub_fallback": True,
             }
         ),
-        openai=OpenAIConfig(
-            api_key=os.getenv("OPENAI_API_KEY", ""),
+        bothub=BotHubConfig(
             model="gpt-4o-mini",
             max_tokens=150,
             temperature=0.0,
-            enabled=bool(os.getenv("OPENAI_API_KEY")),
+            timeout=10.0,
+            max_retries=2,
+            retry_delay=1.0,
         ),
         external_apis={
             "cas": {"api_url": os.getenv("CAS_API_URL"), "timeout": 5, "cache_ttl": 3600}

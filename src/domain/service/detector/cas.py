@@ -49,7 +49,7 @@ class CASDetector:
         self._errors = 0
         self._banned_users = 0
 
-        logger.info("🛡️ CAS Detector инициализирован")
+        logger.info("[SHIELD] CAS Detector инициализирован")
         logger.info(f"   Cache TTL: {self.cache_ttl}s, Timeout: {self.timeout}s")
 
     async def detect(self, message: Message, user_context: Dict[str, Any] = None) -> DetectorResult:
@@ -69,7 +69,7 @@ class CASDetector:
         user_id = message.user_id
         username = getattr(message, "username", None)
 
-        logger.debug(f"🔍 CAS проверка пользователя: {user_id} (@{username})")
+        logger.debug(f"[SEARCH] CAS проверка пользователя: {user_id} (@{username})")
 
         try:
             # Проверяем пользователя в CAS
@@ -78,27 +78,23 @@ class CASDetector:
 
             processing_time_ms = (time.time() - start_time) * 1000
 
-            if cas_result.get("banned", False):
+            # cas_result это bool, а не dict
+            if cas_result:
                 # Пользователь забанен
                 self._banned_users += 1
 
-                ban_reason = cas_result.get("reason", "Unknown")
-                ban_date = cas_result.get("date", "Unknown")
-
-                logger.warning(f"🚨 CAS BAN: пользователь {user_id} забанен")
-                logger.warning(f"   Причина: {ban_reason}")
-                logger.warning(f"   Дата бана: {ban_date}")
+                logger.warning(f"[ALERT] CAS BAN: пользователь {user_id} забанен")
 
                 return DetectorResult(
                     detector_name="CAS",
                     is_spam=True,
                     confidence=self.banned_confidence,
-                    details=f"User banned in CAS: {ban_reason} ({ban_date})",
+                    details="User banned in CAS database",
                     processing_time_ms=processing_time_ms,
                 )
             else:
                 # Пользователь не найден в базе банов
-                logger.debug(f"✅ CAS: пользователь {user_id} чист ({processing_time_ms:.1f}ms)")
+                logger.debug(f"[OK] CAS: пользователь {user_id} чист ({processing_time_ms:.1f}ms)")
 
                 return DetectorResult(
                     detector_name="CAS",
@@ -112,7 +108,7 @@ class CASDetector:
             self._errors += 1
             processing_time_ms = (time.time() - start_time) * 1000
 
-            logger.error(f"⚠️ CAS проверка failed для пользователя {user_id}: {e}")
+            logger.error(f"[WARN] CAS проверка failed для пользователя {user_id}: {e}")
 
             # Graceful degradation - возвращаем "не спам" при ошибке
             return DetectorResult(
@@ -139,17 +135,17 @@ class CASDetector:
         try:
             # Используем batch API если доступно
             if hasattr(self.cas_gateway, "check_cas_batch"):
-                logger.info(f"🔍 CAS batch проверка {len(user_ids)} пользователей")
+                logger.info(f"[SEARCH] CAS batch проверка {len(user_ids)} пользователей")
 
                 batch_results = await self.cas_gateway.check_cas_batch(user_ids)
 
                 for user_id, cas_result in batch_results.items():
-                    if cas_result.get("banned", False):
+                    if cas_result:  # cas_result is bool
                         results[user_id] = DetectorResult(
                             detector_name="CAS",
                             is_spam=True,
                             confidence=self.banned_confidence,
-                            details=f"User banned: {cas_result.get('reason', 'Unknown')}",
+                            details="User banned in CAS",
                         )
                     else:
                         results[user_id] = DetectorResult(
@@ -160,18 +156,18 @@ class CASDetector:
                         )
             else:
                 # Fallback: проверяем по одному
-                logger.info(f"🔍 CAS последовательная проверка {len(user_ids)} пользователей")
+                logger.info(f"[SEARCH] CAS последовательная проверка {len(user_ids)} пользователей")
 
                 for user_id in user_ids:
                     try:
                         cas_result = await self.cas_gateway.check_cas(user_id)
 
-                        if cas_result.get("banned", False):
+                        if cas_result:  # cas_result is bool
                             results[user_id] = DetectorResult(
                                 detector_name="CAS",
                                 is_spam=True,
                                 confidence=self.banned_confidence,
-                                details=f"User banned: {cas_result.get('reason', 'Unknown')}",
+                                details="User banned in CAS",
                             )
                         else:
                             results[user_id] = DetectorResult(
@@ -181,7 +177,7 @@ class CASDetector:
                                 details="User not banned",
                             )
                     except Exception as e:
-                        logger.error(f"⚠️ CAS ошибка для пользователя {user_id}: {e}")
+                        logger.error(f"[WARN] CAS ошибка для пользователя {user_id}: {e}")
                         results[user_id] = DetectorResult(
                             detector_name="CAS",
                             is_spam=False,
@@ -191,7 +187,7 @@ class CASDetector:
                         )
 
         except Exception as e:
-            logger.error(f"❌ CAS batch проверка failed: {e}")
+            logger.error(f"[ERROR] CAS batch проверка failed: {e}")
 
             # Fallback: все пользователи считаются чистыми
             for user_id in user_ids:
@@ -253,7 +249,7 @@ class CASDetector:
             }
 
         except Exception as e:
-            logger.error(f"❌ CAS health check failed: {e}")
+            logger.error(f"[ERROR] CAS health check failed: {e}")
 
             return {
                 "status": "error",
@@ -272,17 +268,17 @@ class CASDetector:
         if not common_user_ids:
             return
 
-        logger.info(f"🔥 Прогрев CAS кэша для {len(common_user_ids)} пользователей...")
+        logger.info(f"[WARM] Прогрев CAS кэша для {len(common_user_ids)} пользователей...")
 
         try:
             # Используем batch проверку если возможно
             results = await self.check_multiple_users(common_user_ids)
 
             cache_entries = len([r for r in results.values() if not r.error])
-            logger.info(f"✅ CAS кэш прогрет: {cache_entries} записей")
+            logger.info(f"[OK] CAS кэш прогрет: {cache_entries} записей")
 
         except Exception as e:
-            logger.error(f"⚠️ Ошибка прогрева CAS кэша: {e}")
+            logger.error(f"[WARN] Ошибка прогрева CAS кэша: {e}")
 
     def reset_stats(self):
         """Сбрасывает статистику (для тестирования)"""
@@ -291,4 +287,4 @@ class CASDetector:
         self._api_calls = 0
         self._errors = 0
         self._banned_users = 0
-        logger.info("📊 CAS статистика сброшена")
+        logger.info("[STATS] CAS статистика сброшена")

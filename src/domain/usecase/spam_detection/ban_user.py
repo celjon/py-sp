@@ -46,6 +46,7 @@ class BanUserUseCase:
         detection_result: DetectionResult,
         ban_type: str = "permanent",
         aggressive_cleanup: bool = False,
+        require_user_in_db: bool = True,
     ) -> Dict[str, Any]:
         """
         Выполняет бан или ограничение пользователя
@@ -56,6 +57,7 @@ class BanUserUseCase:
             detection_result: Результат детекции спама
             ban_type: Тип бана ("permanent", "restrict", "warn")
             aggressive_cleanup: Удалять ли все недавние сообщения пользователя
+            require_user_in_db: Требовать ли существование пользователя в БД (False для админских команд)
 
         Returns:
             Словарь с результатами операции
@@ -69,18 +71,22 @@ class BanUserUseCase:
         }
 
         try:
-            # Получаем пользователя
-            user = await self.user_repo.get_user(user_id)
-            if not user:
-                result["error"] = "User not found"
-                return result
+            # Получаем пользователя (только если требуется)
+            user = None
+            if require_user_in_db:
+                user = await self.user_repo.get_user(user_id)
+                if not user:
+                    result["error"] = "User not found"
+                    return result
 
             # Выполняем действие в зависимости от типа
             if ban_type == "permanent" or detection_result.should_ban:
                 success = await self._ban_user(chat_id, user_id)
                 if success:
                     result["banned"] = True
-                    await self.user_repo.update_user_status(user_id, UserStatus.BANNED)
+                    # Обновляем статус в БД только если пользователь существует
+                    if user:
+                        await self.user_repo.update_user_status(user_id, UserStatus.BANNED)
                 else:
                     result["error"] = "Failed to ban user via Telegram API"
                     return result
@@ -89,7 +95,9 @@ class BanUserUseCase:
                 success = await self._restrict_user(chat_id, user_id)
                 if success:
                     result["restricted"] = True
-                    await self.user_repo.update_user_status(user_id, UserStatus.RESTRICTED)
+                    # Обновляем статус в БД только если пользователь существует
+                    if user:
+                        await self.user_repo.update_user_status(user_id, UserStatus.RESTRICTED)
                 else:
                     result["error"] = "Failed to restrict user via Telegram API"
                     return result

@@ -1,7 +1,7 @@
 # src/domain/service/detector/ensemble.py
 """
 Production-Ready Ensemble Spam Detector v2.0
-Архитектура: CAS → RUSpam → OpenAI (без устаревших эвристик и ML)
+Архитектура: CAS → RUSpam → BotHub (без устаревших эвристик и ML)
 """
 import asyncio
 import time
@@ -13,7 +13,8 @@ from ...entity.message import Message
 from ...entity.user import User
 from ...entity.detection_result import DetectionResult, DetectorResult, DetectionReason
 from .cas import CASDetector
-from .openai import OpenAIDetector
+# OpenAI детектор удален
+from .bothub import BotHubDetector
 from .ruspam_simple import RUSpamSimpleClassifier
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ class EnsembleDetector:
     Архитектура (3 слоя с ранним выходом):
     1. 🛡️ CAS - мгновенная проверка базы забаненных (100ms)
     2. 🤖 RUSpam - BERT модель для спам-детекции (300ms)
-    3. 🧠 OpenAI - LLM анализ сложных случаев (1.5s)
+    3. 🔗 BotHub - LLM анализ сложных случаев (1.5s)
 
     Production Features:
     - Circuit breaker pattern для external services
@@ -50,7 +51,8 @@ class EnsembleDetector:
 
         # Детекторы (lazy initialization)
         self.cas_detector: Optional[CASDetector] = None
-        self.openai_detector: Optional[OpenAIDetector] = None
+        # openai_detector удален
+        self.bothub_detector: Optional[BotHubDetector] = None
         self.ruspam_detector: Optional[RUSpamSimpleClassifier] = None
 
         # Production пороги
@@ -63,10 +65,13 @@ class EnsembleDetector:
         self.ruspam_min_length = self.config.get("ruspam_min_length", 10)
         self.russian_threshold = self.config.get("russian_threshold", 0.3)
 
-        # Настройки OpenAI
-        self.openai_min_length = self.config.get("openai_min_length", 5)
-        self.use_openai_fallback = self.config.get("use_openai_fallback", True)
-        self.openai_timeout = self.config.get("openai_timeout", 5.0)
+        # Настройки OpenAI удалены
+        
+        # Настройки BotHub (новый провайдер)
+        self.bothub_min_length = self.config.get("bothub_min_length", 5)
+        self.use_bothub_fallback = self.config.get("use_bothub_fallback", True)
+        self.bothub_timeout = self.config.get("bothub_timeout", 5.0)
+        self.bothub_min_ruspam_confidence = self.config.get("bothub_min_ruspam_confidence", 0.2)  # Минимальная уверенность RUSpam для вызова BotHub
 
         # Performance settings
         self.max_processing_time = self.config.get("max_processing_time", 2.0)
@@ -81,7 +86,8 @@ class EnsembleDetector:
         self._circuit_breakers: Dict[str, CircuitBreakerState] = {
             "cas": CircuitBreakerState(),
             "ruspam": CircuitBreakerState(),
-            "openai": CircuitBreakerState(),
+            # "openai" удален
+            "bothub": CircuitBreakerState(),
         }
 
         # Performance metrics
@@ -89,7 +95,7 @@ class EnsembleDetector:
         self._total_processing_time = 0.0
         self._error_count = 0
 
-        logger.info("🎯 Production ансамбль инициализирован: CAS + RUSpam + OpenAI")
+        logger.info("[TARGET] Production ансамбль инициализирован: CAS + RUSpam + BotHub")
         logger.info(
             f"   Пороги: spam={self.spam_threshold}, high={self.high_confidence_threshold}, auto_ban={self.auto_ban_threshold}"
         )
@@ -100,29 +106,37 @@ class EnsembleDetector:
     def add_cas_detector(self, cas_gateway) -> None:
         """Добавляет CAS детектор"""
         self.cas_detector = CASDetector(cas_gateway)
-        logger.info("✅ CAS детектор добавлен")
+        logger.info("[OK] CAS детектор добавлен")
 
-    def add_openai_detector(self, openai_gateway) -> None:
-        """Добавляет OpenAI детектор"""
-        self.openai_detector = OpenAIDetector(openai_gateway)
-        logger.info("✅ OpenAI детектор добавлен")
+    # add_openai_detector удален
+
+    def add_bothub_detector(self, bothub_gateway) -> None:
+        """Добавляет BotHub детектор (новый провайдер)"""
+        self.bothub_detector = BotHubDetector(bothub_gateway)
+        logger.info("[OK] BotHub детектор добавлен")
 
     def add_ruspam_detector(self) -> None:
-        """Добавляет RUSpam BERT детектор"""
+        """Добавляет RUSpam BERT детектор (критический компонент)"""
         if not self.use_ruspam:
-            logger.warning("⚠️ RUSpam отключен в конфигурации")
+            logger.warning("[WARN] RUSpam отключен в конфигурации")
             return
 
         try:
+            # RUSpam - критический компонент, при ошибке загрузки бот должен упасть
             self.ruspam_detector = RUSpamSimpleClassifier()
-            logger.info("✅ RUSpam BERT детектор инициализирован")
+            logger.info("[OK] RUSpam BERT детектор инициализирован")
         except ImportError as e:
-            logger.warning(f"⚠️ RUSpam dependencies не найдены: {e}")
-            logger.info("💡 Установите: pip install torch transformers ruSpam")
-            self.ruspam_detector = None
+            error_msg = f"КРИТИЧЕСКАЯ ОШИБКА: RUSpam dependencies не найдены: {e}"
+            logger.error(f"[ERROR] {error_msg}")
+            logger.error("💡 Установите: pip install torch transformers")
+            raise RuntimeError(error_msg)
+        except RuntimeError:
+            # RuntimeError уже содержит подробное сообщение от RUSpamSimpleClassifier
+            raise  # Пробрасываем ошибку дальше
         except Exception as e:
-            logger.error(f"⚠️ RUSpam не загружен: {e}")
-            self.ruspam_detector = None
+            error_msg = f"КРИТИЧЕСКАЯ ОШИБКА: RUSpam не загружен: {e}"
+            logger.error(f"[ERROR] {error_msg}")
+            raise RuntimeError(error_msg)
 
     def _is_circuit_breaker_open(self, detector_name: str) -> bool:
         """Проверяет, открыт ли circuit breaker для детектора"""
@@ -137,7 +151,7 @@ class EnsembleDetector:
         if time.time() - breaker.last_failure_time > self.circuit_breaker_timeout:
             breaker.is_open = False
             breaker.failure_count = 0
-            logger.info(f"🔄 Circuit breaker для {detector_name} переходит в half-open")
+            logger.info(f"[REFRESH] Circuit breaker для {detector_name} переходит в half-open")
             return False
 
         return True
@@ -154,7 +168,7 @@ class EnsembleDetector:
                 # Закрываем circuit breaker после нескольких успешных вызовов
                 breaker.is_open = False
                 breaker.failure_count = 0
-                logger.info(f"✅ Circuit breaker для {detector_name} закрыт")
+                logger.info(f"[OK] Circuit breaker для {detector_name} закрыт")
 
     def _record_detector_failure(self, detector_name: str, error: Exception):
         """Записывает ошибку детектора"""
@@ -170,7 +184,7 @@ class EnsembleDetector:
             if breaker.failure_count >= self.circuit_breaker_threshold:
                 breaker.is_open = True
                 logger.warning(
-                    f"🚨 Circuit breaker для {detector_name} открыт после {breaker.failure_count} ошибок"
+                    f"[ALERT] Circuit breaker для {detector_name} открыт после {breaker.failure_count} ошибок"
                 )
                 logger.warning(f"   Последняя ошибка: {error}")
 
@@ -213,7 +227,7 @@ class EnsembleDetector:
         Production логика:
         1. 🛡️ CAS проверка (100ms) - если забанен → мгновенный бан
         2. 🤖 RUSpam BERT (300ms) - если спам ≥0.8 → ранний выход
-        3. 🧠 OpenAI LLM (1.5s) - контекстуальный анализ
+        3. 🧠 BotHub LLM (1.5s) - контекстуальный анализ
 
         Args:
             message: Сообщение для анализа
@@ -235,7 +249,7 @@ class EnsembleDetector:
         self._detection_count += 1
 
         logger.info(
-            f"🔍 Детекция #{self._detection_count}: '{text[:50]}{'...' if len(text) > 50 else ''}' (язык: {detected_language})"
+            f"[SEARCH] Детекция #{self._detection_count}: '{text[:50]}{'...' if len(text) > 50 else ''}' (язык: {detected_language})"
         )
 
         try:
@@ -255,7 +269,7 @@ class EnsembleDetector:
                         "Пользователь забанен в CAS базе",
                     )
                     logger.warning(
-                        f"🚨 CAS BAN: пользователь {message.user_id} ({final_result.processing_time_ms:.1f}ms)"
+                        f"[ALERT] CAS BAN: пользователь {message.user_id} ({final_result.processing_time_ms:.1f}ms)"
                     )
                     return final_result
 
@@ -284,26 +298,36 @@ class EnsembleDetector:
                             f"RUSpam высокая уверенность: {ruspam_result.details}",
                         )
                         logger.warning(
-                            f"🚨 EARLY EXIT: RUSpam уверенность {ruspam_result.confidence:.3f} ({final_result.processing_time_ms:.1f}ms)"
+                            f"[ALERT] EARLY EXIT: RUSpam уверенность {ruspam_result.confidence:.3f} ({final_result.processing_time_ms:.1f}ms)"
                         )
                         return final_result
 
-            # === СЛОЙ 3: OPENAI LLM ===
+            # === СЛОЙ 3: BOTHUB LLM ===
             # Проверяем таймаут
             elapsed_time = time.time() - start_time
             if elapsed_time >= self.max_processing_time:
                 logger.warning(
-                    f"⏰ Превышен лимит времени ({elapsed_time:.2f}s), пропускаем OpenAI"
+                    f"[TIME] Превышен лимит времени ({elapsed_time:.2f}s), пропускаем BotHub"
                 )
             else:
-                openai_result = await self._check_openai(message, user_context, text)
-                if openai_result:
-                    results.append(openai_result)
-                    if openai_result.is_spam:
-                        if not is_spam_detected:  # OpenAI как первичный детектор
-                            is_spam_detected = True
-                            primary_reason = DetectionReason.OPENAI_DETECTED
-                        max_confidence = max(max_confidence, openai_result.confidence)
+                # Вызываем BotHub только в "серой зоне" RUSpam
+                ruspam_confidence = max_confidence if is_spam_detected else 0.0
+                should_call_bothub = (
+                    self.bothub_min_ruspam_confidence <= ruspam_confidence < self.high_confidence_threshold
+                )
+                
+                if should_call_bothub:
+                    logger.info(f"[BOTHUB] Вызываем BotHub для проверки (RUSpam уверенность: {ruspam_confidence:.3f})")
+                    bothub_result = await self._check_bothub(message, user_context, text, ruspam_confidence)
+                    if bothub_result:
+                        results.append(bothub_result)
+                        if bothub_result.is_spam:
+                            if not is_spam_detected:  # BotHub как первичный детектор
+                                is_spam_detected = True
+                                primary_reason = DetectionReason.BOTHUB_DETECTED
+                            max_confidence = max(max_confidence, bothub_result.confidence)
+                else:
+                    logger.debug(f"[BOTHUB] Пропускаем BotHub (RUSpam уверенность: {ruspam_confidence:.3f}, зона: {self.bothub_min_ruspam_confidence}-{self.high_confidence_threshold})")
 
             # Генерируем финальное решение
             notes = self._generate_notes(results, detected_language, is_spam_detected)
@@ -330,11 +354,11 @@ class EnsembleDetector:
             return final_result
 
         except asyncio.TimeoutError:
-            logger.error(f"⏰ Timeout при детекции сообщения {message.id}")
+            logger.error(f"[TIME] Timeout при детекции сообщения {message.id}")
             self._error_count += 1
             return self._create_timeout_result(message, results, start_time)
         except Exception as e:
-            logger.error(f"❌ Критическая ошибка в детекции: {e}")
+            logger.error(f"[ERROR] Критическая ошибка в детекции: {e}")
             self._error_count += 1
             return self._create_error_result(message, results, start_time, str(e))
 
@@ -349,7 +373,7 @@ class EnsembleDetector:
 
         # Проверяем circuit breaker
         if self._is_circuit_breaker_open(detector_name):
-            logger.warning(f"⚡ CAS circuit breaker открыт, пропускаем проверку")
+            logger.warning(f"[FAST] CAS circuit breaker открыт, пропускаем проверку")
             return None
 
         try:
@@ -364,19 +388,19 @@ class EnsembleDetector:
 
             if cas_result.is_spam:
                 logger.warning(
-                    f"🚨 CAS: Пользователь {message.user_id} забанен ({processing_time:.1f}ms)"
+                    f"[ALERT] CAS: Пользователь {message.user_id} забанен ({processing_time:.1f}ms)"
                 )
             else:
-                logger.debug(f"✅ CAS: Пользователь чист ({processing_time:.1f}ms)")
+                logger.debug(f"[OK] CAS: Пользователь чист ({processing_time:.1f}ms)")
 
             return cas_result
 
         except asyncio.TimeoutError:
-            logger.warning(f"⏰ CAS timeout для пользователя {message.user_id}")
+            logger.warning(f"[TIME] CAS timeout для пользователя {message.user_id}")
             self._record_detector_failure(detector_name, TimeoutError("CAS timeout"))
             return None
         except Exception as e:
-            logger.error(f"⚠️ CAS ошибка: {e}")
+            logger.error(f"[WARN] CAS ошибка: {e}")
             self._record_detector_failure(detector_name, e)
             return None
 
@@ -389,7 +413,7 @@ class EnsembleDetector:
 
         # Проверяем circuit breaker
         if self._is_circuit_breaker_open(detector_name):
-            logger.warning(f"⚡ RUSpam circuit breaker открыт, пропускаем проверку")
+            logger.warning(f"[FAST] RUSpam circuit breaker открыт, пропускаем проверку")
             return None
 
         try:
@@ -412,21 +436,21 @@ class EnsembleDetector:
 
             if ruspam_result.is_spam:
                 logger.warning(
-                    f"🚨 RUSpam: СПАМ обнаружен ({ruspam_result.confidence:.3f}, {processing_time:.1f}ms)"
+                    f"[ALERT] RUSpam: СПАМ обнаружен ({ruspam_result.confidence:.3f}, {processing_time:.1f}ms)"
                 )
             else:
                 logger.debug(
-                    f"✅ RUSpam: Сообщение чистое ({1.0 - ruspam_result.confidence:.3f}, {processing_time:.1f}ms)"
+                    f"[OK] RUSpam: Сообщение чистое ({1.0 - ruspam_result.confidence:.3f}, {processing_time:.1f}ms)"
                 )
 
             return detector_result
 
         except asyncio.TimeoutError:
-            logger.warning(f"⏰ RUSpam timeout")
+            logger.warning(f"[TIME] RUSpam timeout")
             self._record_detector_failure(detector_name, TimeoutError("RUSpam timeout"))
             return None
         except Exception as e:
-            logger.error(f"⚠️ RUSpam ошибка: {e}")
+            logger.error(f"[WARN] RUSpam ошибка: {e}")
             self._record_detector_failure(detector_name, e)
             return DetectorResult(
                 detector_name="RUSpam",
@@ -437,55 +461,58 @@ class EnsembleDetector:
                 processing_time_ms=0.0,
             )
 
-    async def _check_openai(
-        self, message: Message, user_context: Dict[str, Any], text: str
+    async def _check_bothub(
+        self, message: Message, user_context: Dict[str, Any], text: str, ruspam_confidence: float = 0.0
     ) -> Optional[DetectorResult]:
-        """Проверка OpenAI LLM с circuit breaker"""
-        detector_name = "openai"
+        """Проверка BotHub LLM с circuit breaker"""
+        detector_name = "bothub"
 
         if (
-            not self.openai_detector
-            or not self.use_openai_fallback
-            or len(text.strip()) < self.openai_min_length
+            not self.bothub_detector
+            or not self.use_bothub_fallback
+            or len(text.strip()) < self.bothub_min_length
         ):
             return None
 
         # Проверяем circuit breaker
         if self._is_circuit_breaker_open(detector_name):
-            logger.warning(f"⚡ OpenAI circuit breaker открыт, пропускаем проверку")
+            logger.warning(f"[FAST] BotHub circuit breaker открыт, пропускаем проверку")
             return None
 
+        # Логируем вызов BotHub с контекстом RUSpam
+        logger.info(f"[BOTHUB] Запускаем проверку (RUSpam уверенность: {ruspam_confidence:.3f}, длина текста: {len(text)})")
+
         try:
-            start_openai = time.time()
-            openai_result = await asyncio.wait_for(
-                self.openai_detector.detect(message, user_context), timeout=self.openai_timeout
+            start_bothub = time.time()
+            bothub_result = await asyncio.wait_for(
+                self.bothub_detector.detect(message, user_context), timeout=self.bothub_timeout
             )
-            processing_time = (time.time() - start_openai) * 1000
+            processing_time = (time.time() - start_bothub) * 1000
 
             # Записываем успех
             self._record_detector_success(detector_name)
 
-            if openai_result.is_spam:
+            if bothub_result.is_spam:
                 logger.warning(
-                    f"🚨 OpenAI: СПАМ обнаружен ({openai_result.confidence:.3f}, {processing_time:.1f}ms)"
+                    f"[ALERT] BotHub: СПАМ обнаружен ({bothub_result.confidence:.3f}, {processing_time:.1f}ms)"
                 )
             else:
-                logger.debug(f"✅ OpenAI: Сообщение чистое ({processing_time:.1f}ms)")
+                logger.debug(f"[OK] BotHub: Сообщение чистое ({processing_time:.1f}ms)")
 
-            return openai_result
+            return bothub_result
 
         except asyncio.TimeoutError:
-            logger.warning(f"⏰ OpenAI timeout")
-            self._record_detector_failure(detector_name, TimeoutError("OpenAI timeout"))
+            logger.warning(f"[TIME] BotHub timeout")
+            self._record_detector_failure(detector_name, TimeoutError("BotHub timeout"))
             return None
         except Exception as e:
-            logger.error(f"⚠️ OpenAI ошибка: {e}")
+            logger.error(f"[WARN] BotHub ошибка: {e}")
             self._record_detector_failure(detector_name, e)
             return DetectorResult(
-                detector_name="OpenAI",
+                detector_name="BotHub",
                 is_spam=False,
                 confidence=0.0,
-                details=f"OpenAI error: {str(e)}",
+                details=f"BotHub error: {str(e)}",
                 error=str(e),
                 processing_time_ms=0.0,
             )
@@ -517,7 +544,8 @@ class EnsembleDetector:
             if result.is_spam and result.details:
                 detection_reasons.append(result.details)
 
-        return DetectionResult(
+        # Создаем результат с правильными параметрами
+        result = DetectionResult(
             message_id=message.id or 0,
             user_id=message.user_id,
             is_spam=is_spam,
@@ -525,14 +553,20 @@ class EnsembleDetector:
             primary_reason=primary_reason,
             detector_results=results,
             processing_time_ms=processing_time_ms,
-            notes=notes,
-            reasons=detection_reasons,
-            recommended_action=action,
             should_ban=should_ban,
             should_delete=should_delete,
             should_restrict=should_restrict,
             should_warn=should_warn,
         )
+
+        # Добавляем дополнительную информацию в metadata
+        result.metadata = {
+            "notes": notes,
+            "detection_reasons": detection_reasons,
+            "recommended_action": action,
+        }
+
+        return result
 
     def _determine_action(
         self, confidence: float, is_spam: bool, user_context: Dict[str, Any] = None
@@ -604,22 +638,28 @@ class EnsembleDetector:
         """Создает результат при превышении таймаута"""
         processing_time_ms = (time.time() - start_time) * 1000
 
-        return DetectionResult(
+        result = DetectionResult(
             message_id=message.id or 0,
             user_id=message.user_id,
             is_spam=False,  # При таймауте не блокируем
             overall_confidence=0.0,
-            primary_reason=None,
+            primary_reason=DetectionReason.RUSPAM_CLEAN,  # Fallback reason
             detector_results=results,
             processing_time_ms=processing_time_ms,
-            notes=f"Превышен лимит времени обработки ({processing_time_ms:.1f}ms)",
-            reasons=["timeout"],
-            recommended_action="allow",
             should_ban=False,
             should_delete=False,
             should_restrict=False,
             should_warn=False,
         )
+
+        # Добавляем информацию о таймауте в metadata
+        result.metadata = {
+            "notes": f"Превышен лимит времени обработки ({processing_time_ms:.1f}ms)",
+            "reasons": ["timeout"],
+            "recommended_action": "allow",
+        }
+
+        return result
 
     def _create_error_result(
         self, message: Message, results: List[DetectorResult], start_time: float, error: str
@@ -627,22 +667,28 @@ class EnsembleDetector:
         """Создает результат при критической ошибке"""
         processing_time_ms = (time.time() - start_time) * 1000
 
-        return DetectionResult(
+        result = DetectionResult(
             message_id=message.id or 0,
             user_id=message.user_id,
             is_spam=False,  # При ошибке не блокируем
             overall_confidence=0.0,
-            primary_reason=None,
+            primary_reason=DetectionReason.RUSPAM_CLEAN,  # Fallback reason
             detector_results=results,
             processing_time_ms=processing_time_ms,
-            notes=f"Ошибка детекции: {error}",
-            reasons=["detection_error"],
-            recommended_action="allow",
             should_ban=False,
             should_delete=False,
             should_restrict=False,
             should_warn=False,
         )
+
+        # Добавляем информацию об ошибке в metadata
+        result.metadata = {
+            "notes": f"Ошибка детекции: {error}",
+            "reasons": ["detection_error"],
+            "recommended_action": "allow",
+        }
+
+        return result
 
     def _update_performance_metrics(self, processing_time_ms: float):
         """Обновляет метрики производительности"""
@@ -651,7 +697,7 @@ class EnsembleDetector:
         # Логируем если обработка слишком долгая
         if processing_time_ms > self.max_processing_time * 1000:
             logger.warning(
-                f"⚠️ Медленная детекция: {processing_time_ms:.1f}ms (лимит: {self.max_processing_time * 1000}ms)"
+                f"[WARN] Медленная детекция: {processing_time_ms:.1f}ms (лимит: {self.max_processing_time * 1000}ms)"
             )
 
     async def get_available_detectors(self) -> List[str]:
@@ -662,8 +708,7 @@ class EnsembleDetector:
             detectors.append("cas")
         if self.ruspam_detector:
             detectors.append("ruspam")
-        if self.openai_detector:
-            detectors.append("openai")
+        # openai_detector удален
 
         return detectors
 
@@ -699,7 +744,7 @@ class EnsembleDetector:
         """
         health = {
             "status": "unknown",
-            "architecture": "modern",  # CAS + RUSpam + OpenAI
+            "architecture": "modern",  # CAS + RUSpam + BotHub
             "detectors": {},
             "timestamp": time.time(),
             "performance": {
@@ -735,55 +780,30 @@ class EnsembleDetector:
         # RUSpam детектор
         try:
             if self.ruspam_detector:
-                # Быстрый тест
-                try:
-                    test_result = await asyncio.wait_for(
-                        self.ruspam_detector.classify("тест"), timeout=2.0
-                    )
+                # Проверяем только статус загрузки модели без тестовой классификации
+                cb_state = self._circuit_breakers.get("ruspam", CircuitBreakerState())
 
-                    cb_state = self._circuit_breakers.get("ruspam", CircuitBreakerState())
-                    health["detectors"]["ruspam"] = {
-                        "status": "degraded" if cb_state.is_open else "healthy",
-                        "available": not cb_state.is_open,
-                        "type": "bert_model",
-                        "circuit_breaker": {
-                            "is_open": cb_state.is_open,
-                            "failure_count": cb_state.failure_count,
-                        },
-                    }
-                    detectors_status.append(not cb_state.is_open)
-                except Exception as e:
-                    health["detectors"]["ruspam"] = {
-                        "status": "error",
-                        "error": str(e),
-                        "available": False,
-                    }
-                    detectors_status.append(False)
+                # Проверяем что модель действительно загружена
+                model_loaded = getattr(self.ruspam_detector, 'is_loaded', False)
+
+                health["detectors"]["ruspam"] = {
+                    "status": "degraded" if cb_state.is_open else ("healthy" if model_loaded else "error"),
+                    "available": not cb_state.is_open and model_loaded,
+                    "type": "bert_model",
+                    "model_loaded": model_loaded,
+                    "circuit_breaker": {
+                        "is_open": cb_state.is_open,
+                        "failure_count": cb_state.failure_count,
+                    },
+                }
+                detectors_status.append(not cb_state.is_open and model_loaded)
             else:
                 health["detectors"]["ruspam"] = {"status": "not_available", "available": False}
         except Exception as e:
             health["detectors"]["ruspam"] = {"status": "error", "error": str(e), "available": False}
             detectors_status.append(False)
 
-        # OpenAI детектор
-        try:
-            if self.openai_detector:
-                cb_state = self._circuit_breakers.get("openai", CircuitBreakerState())
-                health["detectors"]["openai"] = {
-                    "status": "degraded" if cb_state.is_open else "healthy",
-                    "available": not cb_state.is_open,
-                    "type": "llm_model",
-                    "circuit_breaker": {
-                        "is_open": cb_state.is_open,
-                        "failure_count": cb_state.failure_count,
-                    },
-                }
-                detectors_status.append(not cb_state.is_open)
-            else:
-                health["detectors"]["openai"] = {"status": "not_configured", "available": False}
-        except Exception as e:
-            health["detectors"]["openai"] = {"status": "error", "error": str(e), "available": False}
-            detectors_status.append(False)
+        # OpenAI детектор удален
 
         # Определяем общий статус
         available_count = sum(1 for status in detectors_status if status)

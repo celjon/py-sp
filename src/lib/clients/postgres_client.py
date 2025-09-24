@@ -84,7 +84,7 @@ class PostgresClient:
         self._connection_errors = 0
 
         logger.info(
-            f"🐘 PostgresClient создан: pool_size={min_size}-{max_size}, timeout={command_timeout}s"
+            f"[DB] PostgresClient создан: pool_size={min_size}-{max_size}, timeout={command_timeout}s"
         )
 
     async def connect(self) -> None:
@@ -94,7 +94,7 @@ class PostgresClient:
             return
 
         try:
-            logger.info("🔌 Подключение к PostgreSQL...")
+            logger.info("[CONNECT] Подключение к PostgreSQL...")
 
             self.pool = await asyncpg.create_pool(
                 self.database_url,
@@ -110,24 +110,24 @@ class PostgresClient:
             # Проверяем соединение
             async with self.pool.acquire() as conn:
                 version = await conn.fetchval("SELECT version()")
-                logger.info(f"✅ PostgreSQL подключен: {version[:50]}...")
+                logger.info(f"[OK] PostgreSQL подключен: {version[:50]}...")
 
-            logger.info(f"✅ Connection pool создан: {self.min_size}-{self.max_size} соединений")
+            logger.info(f"[OK] Connection pool создан: {self.min_size}-{self.max_size} соединений")
 
         except Exception as e:
-            logger.error(f"❌ Ошибка подключения к PostgreSQL: {e}")
+            logger.error(f"[ERROR] Ошибка подключения к PostgreSQL: {e}")
             raise RuntimeError(f"Failed to connect to PostgreSQL: {e}")
 
     async def disconnect(self) -> None:
         """Закрывает пул соединений"""
         if self.pool is not None:
             try:
-                logger.info("🔌 Закрытие PostgreSQL соединений...")
+                logger.info("[CONNECT] Закрытие PostgreSQL соединений...")
                 await self.pool.close()
                 self.pool = None
-                logger.info("✅ PostgreSQL отключен")
+                logger.info("[OK] PostgreSQL отключен")
             except Exception as e:
-                logger.error(f"⚠️ Ошибка закрытия PostgreSQL: {e}")
+                logger.error(f"[WARN] Ошибка закрытия PostgreSQL: {e}")
 
     async def _connection_init_hook(self, conn):
         """Hook вызываемый при создании каждого соединения"""
@@ -141,7 +141,7 @@ class PostgresClient:
             # await conn.set_type_codec('json', encoder=json.dumps, decoder=json.loads, schema='pg_catalog')
             pass
         except Exception as e:
-            logger.warning(f"⚠️ Connection setup warning: {e}")
+            logger.warning(f"[WARN] Connection setup warning: {e}")
 
     @asynccontextmanager
     async def acquire(self):
@@ -165,12 +165,12 @@ class PostgresClient:
 
         except asyncio.TimeoutError:
             self._connection_errors += 1
-            logger.error("⏰ Timeout при получении PostgreSQL соединения")
+            logger.error("[TIME] Timeout при получении PostgreSQL соединения")
             raise RuntimeError("Database connection timeout")
 
         except Exception as e:
             self._connection_errors += 1
-            logger.error(f"❌ Ошибка получения PostgreSQL соединения: {e}")
+            logger.error(f"[ERROR] Ошибка получения PostgreSQL соединения: {e}")
             raise
 
         finally:
@@ -178,12 +178,12 @@ class PostgresClient:
                 try:
                     await self.pool.release(connection)
                 except Exception as e:
-                    logger.error(f"⚠️ Ошибка возврата соединения в пул: {e}")
+                    logger.error(f"[WARN] Ошибка возврата соединения в пул: {e}")
 
             # Записываем время получения соединения
             acquisition_time = time.time() - start_time
             if acquisition_time > 1.0:  # Предупреждаем если > 1 секунды
-                logger.warning(f"⚠️ Медленное получение соединения: {acquisition_time:.2f}s")
+                logger.warning(f"[WARN] Медленное получение соединения: {acquisition_time:.2f}s")
 
     async def execute(self, query: str, *args, timeout: float = None) -> str:
         """
@@ -210,14 +210,14 @@ class PostgresClient:
                 self._total_query_time += query_time
 
                 if query_time > 1.0:  # Медленный запрос
-                    logger.warning(f"⚠️ Медленный execute: {query_time:.2f}s - {query[:100]}")
+                    logger.warning(f"[WARN] Медленный execute: {query_time:.2f}s - {query[:100]}")
 
                 return result
 
         except Exception as e:
             self._failed_queries += 1
             query_time = time.time() - start_time
-            logger.error(f"❌ Execute failed ({query_time:.2f}s): {query[:100]} - {e}")
+            logger.error(f"[ERROR] Execute failed ({query_time:.2f}s): {query[:100]} - {e}")
             raise
 
     async def fetchrow(self, query: str, *args, timeout: float = None) -> Optional[asyncpg.Record]:
@@ -245,14 +245,14 @@ class PostgresClient:
                 self._total_query_time += query_time
 
                 if query_time > 0.5:  # Медленный запрос
-                    logger.warning(f"⚠️ Медленный fetchrow: {query_time:.2f}s - {query[:100]}")
+                    logger.warning(f"[WARN] Медленный fetchrow: {query_time:.2f}s - {query[:100]}")
 
                 return result
 
         except Exception as e:
             self._failed_queries += 1
             query_time = time.time() - start_time
-            logger.error(f"❌ Fetchrow failed ({query_time:.2f}s): {query[:100]} - {e}")
+            logger.error(f"[ERROR] Fetchrow failed ({query_time:.2f}s): {query[:100]} - {e}")
             raise
 
     async def fetch(self, query: str, *args, timeout: float = None) -> List[asyncpg.Record]:
@@ -281,7 +281,7 @@ class PostgresClient:
 
                 if query_time > 1.0 or len(result) > 1000:  # Медленный или большой запрос
                     logger.warning(
-                        f"⚠️ Медленный/большой fetch: {query_time:.2f}s, {len(result)} строк - {query[:100]}"
+                        f"[WARN] Медленный/большой fetch: {query_time:.2f}s, {len(result)} строк - {query[:100]}"
                     )
 
                 return result
@@ -289,7 +289,7 @@ class PostgresClient:
         except Exception as e:
             self._failed_queries += 1
             query_time = time.time() - start_time
-            logger.error(f"❌ Fetch failed ({query_time:.2f}s): {query[:100]} - {e}")
+            logger.error(f"[ERROR] Fetch failed ({query_time:.2f}s): {query[:100]} - {e}")
             raise
 
     async def fetchval(self, query: str, *args, timeout: float = None) -> Any:
@@ -321,7 +321,7 @@ class PostgresClient:
         except Exception as e:
             self._failed_queries += 1
             query_time = time.time() - start_time
-            logger.error(f"❌ Fetchval failed ({query_time:.2f}s): {query[:100]} - {e}")
+            logger.error(f"[ERROR] Fetchval failed ({query_time:.2f}s): {query[:100]} - {e}")
             raise
 
     async def execute_many(self, query: str, args_list: List[tuple], timeout: float = None) -> None:
@@ -348,13 +348,13 @@ class PostgresClient:
 
                 if query_time > 2.0:  # Медленный batch
                     logger.warning(
-                        f"⚠️ Медленный executemany: {query_time:.2f}s, {len(args_list)} операций"
+                        f"[WARN] Медленный executemany: {query_time:.2f}s, {len(args_list)} операций"
                     )
 
         except Exception as e:
             self._failed_queries += len(args_list)
             query_time = time.time() - start_time
-            logger.error(f"❌ ExecuteMany failed ({query_time:.2f}s): {len(args_list)} ops - {e}")
+            logger.error(f"[ERROR] ExecuteMany failed ({query_time:.2f}s): {len(args_list)} ops - {e}")
             raise
 
     @asynccontextmanager
@@ -393,11 +393,11 @@ class PostgresClient:
                         result = await tx.execute(query, *args)
                     results.append(result)
 
-            logger.debug(f"✅ Транзакция выполнена: {len(queries)} запросов")
+            logger.debug(f"[OK] Транзакция выполнена: {len(queries)} запросов")
             return results
 
         except Exception as e:
-            logger.error(f"❌ Транзакция failed: {e}")
+            logger.error(f"[ERROR] Транзакция failed: {e}")
             raise
 
     def get_pool_stats(self) -> ConnectionPoolStats:
@@ -421,7 +421,7 @@ class PostgresClient:
             )
 
         except Exception as e:
-            logger.error(f"⚠️ Ошибка получения статистики пула: {e}")
+            logger.error(f"[WARN] Ошибка получения статистики пула: {e}")
             return ConnectionPoolStats(0, 0, 0, 0, 0, 0, 0)
 
     def get_performance_stats(self) -> Dict[str, Any]:
@@ -528,7 +528,7 @@ class PostgresClient:
                 health_info["status"] = "degraded"
 
         except Exception as e:
-            logger.error(f"❌ PostgreSQL health check failed: {e}")
+            logger.error(f"[ERROR] PostgreSQL health check failed: {e}")
             health_info.update(
                 {"status": "error", "error": str(e), "performance": self.get_performance_stats()}
             )
@@ -551,11 +551,11 @@ class PostgresClient:
             # В asyncpg нет прямого способа cleanup, но можем пересоздать пул
             # Для production используйте connection_max_lifetime в настройках пула
 
-            logger.info(f"🧹 PostgreSQL cleanup: пул размер {initial_size}")
+            logger.info(f"[CLEAN] PostgreSQL cleanup: пул размер {initial_size}")
             return 0  # Placeholder
 
         except Exception as e:
-            logger.error(f"⚠️ Cleanup error: {e}")
+            logger.error(f"[WARN] Cleanup error: {e}")
             return 0
 
     @property
@@ -570,4 +570,4 @@ class PostgresClient:
         self._failed_queries = 0
         self._connections_created = 0
         self._connection_errors = 0
-        logger.info("📊 PostgreSQL статистика сброшена")
+        logger.info("[STATS] PostgreSQL статистика сброшена")

@@ -14,6 +14,21 @@ import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 
+# Загружаем переменные окружения из .env файла
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # Если python-dotenv не установлен, загружаем вручную
+    env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+    if os.path.exists(env_file):
+        with open(env_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key] = value
+
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,10 +43,7 @@ from .config.dependencies import (
     ProductionServices,
 )
 
-# HTTP routes
-from .delivery.http.routes.auth_v2 import router as auth_router
-from .delivery.http.routes.public_api_v2 import router as public_api_router
-from .delivery.http.schema.openapi_generator import setup_openapi_documentation
+# HTTP routes - API удален, используем только Telegram бот
 
 # Services
 from .domain.service.monitoring.prometheus_metrics import (
@@ -39,10 +51,7 @@ from .domain.service.monitoring.prometheus_metrics import (
     MetricsMiddleware,
     create_prometheus_metrics,
 )
-from .domain.service.error_handling.error_handler import (
-    ProductionErrorHandler,
-    create_error_handler,
-)
+# ErrorHandler удален
 
 # Bot imports
 from .delivery.telegram.bot import AntiSpamBot
@@ -117,24 +126,16 @@ async def startup_application():
             except Exception as e:
                 logger.warning(f"[WARN] Failed to start metrics server: {e}")
 
-        # Инициализация error handler
-        error_handler = create_error_handler(
-            service_name="antispam-api", config=validated_config.get("error_handling", {})
-        )
-        app_state["error_handler"] = error_handler
-        logger.info("[OK] Error handler configured")
+        # Error handler удален
 
         # HTTP API components настраиваются при создании приложения
         run_mode = os.getenv("RUN_MODE", "both").lower()
         logger.info(f"[INFO] Running in {run_mode} mode")
 
-        # Запуск Telegram бота если нужно (но только в режиме telegram, не both)
-        if run_mode == "telegram":
+        # Запуск Telegram бота
+        if run_mode in ("telegram", "both"):
             await start_telegram_bot(validated_config, production_services)
             logger.info("[OK] Telegram bot started")
-        elif run_mode == "both":
-            # В режиме both Telegram бот запускается отдельно после HTTP сервера
-            logger.info("[INFO] Both mode: HTTP server will start first, then Telegram bot")
 
         logger.info("[SUCCESS] All services initialized successfully!")
 
@@ -253,14 +254,34 @@ async def start_telegram_bot(config: Dict[str, Any], services: ProductionService
         # Получаем Redis URL
         redis_url = config.get("redis_url") or config.get("redis", {}).get("url")
 
-        # Создаем зависимости для бота
+        # Создаем зависимости для бота - только Telegram компоненты
         bot_dependencies = {
+            # Domain Services
             "ensemble_detector": services.ensemble_detector,
-            "usage_analytics": services.usage_analytics,
+
+            # Repositories
             "user_repository": services.user_repo,
             "message_repository": services.message_repo,
+            "spam_samples_repository": services.spam_samples_repo,
+            "chat_repository": services.chat_repo,
+
+            # Use Cases
+            "check_message_usecase": services.check_message_usecase,
             "ban_user_usecase": services.ban_user_usecase,
+
+            # Infrastructure
+            "postgres_client": services.postgres_client,
+            "redis_client": services.redis_client,
+            "redis_cache": services.redis_cache,
+
+            # Gateways
+            "cas_gateway": services.cas_gateway,
+            "bothub_gateway": services.bothub_gateway,
+
+            # Configuration
             "config": config,
+            "admin_chat_id": config.get("admin_chat_id"),
+            "admin_users": config.get("admin_users", []),
         }
 
         # Создаем бота
@@ -295,9 +316,7 @@ def setup_middleware(
     # Metrics middleware
     app.add_middleware(MetricsMiddleware, metrics=metrics)
 
-    # API Auth middleware (создается в dependencies)
-    auth_middleware = services.api_auth_middleware(app)
-    # Примечание: auth middleware добавляется через factory pattern в dependencies
+    # API Auth middleware удален - используем только Telegram бот
 
 
 def setup_basic_routes(app: FastAPI):
@@ -394,8 +413,7 @@ def setup_basic_routes(app: FastAPI):
 def setup_routes(app: FastAPI):
     """Настройка всех маршрутов включая API"""
     # API routes
-    app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])
-    app.include_router(public_api_router, prefix="/api/v1", tags=["Detection"])
+    # API роуты удалены - используем только Telegram бот
 
     print("[ROUTES] Full API routes configured")
 
@@ -408,14 +426,14 @@ def config_to_dict(config) -> Dict[str, Any]:
     result["bot_token"] = os.getenv("BOT_TOKEN")
     result["database_url"] = os.getenv("DATABASE_URL")
     result["redis_url"] = os.getenv("REDIS_URL")
-    result["openai_api_key"] = os.getenv("OPENAI_API_KEY")
+    # OpenRouter удален
     result["admin_chat_id"] = os.getenv("ADMIN_CHAT_ID")
     result["admin_users"] = (
         os.getenv("ADMIN_USERS", "").split(",") if os.getenv("ADMIN_USERS") else []
     )
     result["environment"] = os.getenv("ENVIRONMENT", "development")
     result["log_level"] = os.getenv("LOG_LEVEL", "INFO")
-    result["jwt_secret"] = os.getenv("JWT_SECRET_KEY")
+    result["jwt_secret"] = os.getenv("JWT_SECRET")
     result["api_secret"] = os.getenv("API_SECRET_KEY")
 
     # Если есть конфиг объект, берем из него недостающие параметры
@@ -434,11 +452,7 @@ def config_to_dict(config) -> Dict[str, Any]:
             else config.spam_detection
         )
 
-    # OpenAI конфигурация
-    if hasattr(config, "openai"):
-        result["openai"] = (
-            vars(config.openai) if hasattr(config.openai, "__dict__") else config.openai
-        )
+    # OpenRouter удален
 
     # Внешние API
     if hasattr(config, "external_apis"):
@@ -550,7 +564,7 @@ async def setup_app_components():
             setup_routes(app)
 
             # Настройка OpenAPI документации
-            setup_openapi_documentation(app)
+            # OpenAPI документация удалена
 
             logger.info("[OK] App components configured")
 
@@ -611,16 +625,20 @@ async def main():
                 await uvicorn.run(app, **uvicorn_config)
 
         else:  # both
-            # HTTP + Telegram
-            await setup_app_components()
+            # HTTP + Telegram - запускаем uvicorn с lifespan
+            uvicorn_config = uvicorn.Config(
+                app=app,
+                host=os.getenv("HTTP_HOST", os.getenv("HOST", "0.0.0.0")),
+                port=int(os.getenv("HTTP_PORT", os.getenv("PORT", "8080"))),
+                log_level=os.getenv("LOG_LEVEL", "info").lower(),
+                access_log=True,
+            )
 
-            # Для режима "both" используем только lifespan запуск
-            # Telegram бот уже запущен в startup_application()
-            logger.info("[BOTH] Both HTTP API and Telegram bot are running")
+            logger.info(f"[BOTH] Starting HTTP+Telegram in both mode")
 
-            # Ждем завершения
-            while not app_state["shutdown_event"].is_set():
-                await asyncio.sleep(1)
+            # Запускаем uvicorn - lifespan автоматически запустит Telegram бота
+            server = uvicorn.Server(uvicorn_config)
+            await server.serve()
 
     except KeyboardInterrupt:
         logger.info("👋 Received KeyboardInterrupt, shutting down...")

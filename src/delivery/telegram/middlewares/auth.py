@@ -1,6 +1,9 @@
 from typing import Dict, Any, Callable, Awaitable, List
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AuthMiddleware(BaseMiddleware):
@@ -41,9 +44,15 @@ class AuthMiddleware(BaseMiddleware):
     ) -> Any:
         """Основной метод middleware"""
 
-        # Проверяем права для сообщений с командами
+        # Логируем все входящие события
         if isinstance(event, Message):
+            text = event.text or "No text"
+            user_id = event.from_user.id if event.from_user else "No user"
+            chat_type = event.chat.type if event.chat else "No chat"
+            logger.info(f"[AUTH] Получено сообщение: '{text[:50]}' от {user_id} в {chat_type}")
+
             if not await self._check_message_permissions(event):
+                logger.warning(f"[AUTH] Сообщение заблокировано middleware")
                 return  # Блокируем выполнение
 
         # Проверяем права для callback запросов
@@ -57,38 +66,74 @@ class AuthMiddleware(BaseMiddleware):
         data["user_id"] = user_id
 
         # Продолжаем обработку
-        return await handler(event, data)
+        logger.debug(f"[AUTH] Передаем событие дальше в handlers")
+
+        result = await handler(event, data)
+        
+        # Логируем результат обработки
+        if result is None:
+            logger.debug(f"[AUTH] Handler завершен без возврата значения")
+        else:
+            logger.debug(f"[AUTH] Handler завершен, возвращен результат: {type(result).__name__}")
+        
+        return result
 
     async def _check_message_permissions(self, message: Message) -> bool:
         """Проверяет права для команд в сообщениях"""
         if not message.text or not message.text.startswith("/"):
             return True  # Не команда - пропускаем
 
-        command = message.text.split()[0].lower()
+        # Убираем @bot_username из команды
+        command = message.text.split()[0].lower().split('@')[0]
+        user_id = message.from_user.id if message.from_user else None
+        chat_type = message.chat.type if message.chat else "unknown"
+        chat_id = message.chat.id if message.chat else "unknown"
+
+        logger.info(f"[AUTH] Команда: {command}, user_id: {user_id}, chat_type: {chat_type}, chat_id: {chat_id}")
+
+        # В группах/супергруппах/каналах разрешена ТОЛЬКО команда /ban и только для админов
+        if chat_type in ["group", "supergroup", "channel"]:
+            if command != "/ban":
+                logger.info(f"[AUTH] Команда {command} запрещена в группах/каналах. Игнорируем.")
+                return False  # Молча игнорируем
+
+            # Для /ban проверяем админские права
+            logger.info(f"[AUTH] Команда /ban в группе/канале от {user_id}")
 
         # Если это админская команда
         if command in self.admin_commands:
-            user_id = message.from_user.id if message.from_user else None
+            logger.info(f"[AUTH] Админская команда {command} от пользователя {user_id}")
+            logger.info(f"[AUTH] Список админов: {list(self.admin_user_ids)}")
 
-            # Проверяем, является ли пользователь администратором
-            if user_id not in self.admin_user_ids:
-                # Дополнительно проверяем права в чате
-                if message.chat.type in ["group", "supergroup"]:
-                    try:
-                        chat_member = await message.bot.get_chat_member(
-                            chat_id=message.chat.id, user_id=user_id
-                        )
-                        if chat_member.status in ["administrator", "creator"]:
-                            return True
-                    except Exception:
-                        pass
+            # Проверяем, является ли пользователь глобальным администратором
+            if user_id in self.admin_user_ids:
+                logger.info(f"[AUTH] Пользователь {user_id} - глобальный админ, разрешаем")
+                return True
 
-                await message.reply(
-                    "❌ У вас нет прав для выполнения этой команды.\n"
-                    "Только администраторы могут использовать эту команду."
-                )
-                return False
+            # Дополнительно проверяем права в чате
+            if message.chat.type in ["group", "supergroup", "channel"]:
+                try:
+                    logger.info(f"[AUTH] Проверяем права пользователя {user_id} в чате {chat_id}")
+                    chat_member = await message.bot.get_chat_member(
+                        chat_id=message.chat.id, user_id=user_id
+                    )
+                    logger.info(f"[AUTH] Статус пользователя в чате: {chat_member.status}")
 
+                    if chat_member.status in ["administrator", "creator"]:
+                        logger.info(f"[AUTH] Пользователь {user_id} - админ чата, разрешаем")
+                        return True
+                except Exception as e:
+                    logger.error(f"[AUTH] Ошибка проверки прав в чате: {e}")
+
+            # Доступ запрещен
+            logger.warning(f"[AUTH] Доступ запрещен для пользователя {user_id}")
+            await message.reply(
+                "❌ У вас нет прав для выполнения этой команды.\n"
+                "Только администраторы могут использовать эту команду."
+            )
+            return False
+
+        logger.info(f"[AUTH] Команда {command} не требует админских прав")
         return True
 
     async def _check_callback_permissions(self, callback: CallbackQuery) -> bool:
@@ -105,7 +150,7 @@ class AuthMiddleware(BaseMiddleware):
 
             if user_id not in self.admin_user_ids:
                 # Дополнительно проверяем права в чате
-                if callback.message and callback.message.chat.type in ["group", "supergroup"]:
+                if callback.message and callback.message.chat.type == "group":
                     try:
                         chat_member = await callback.bot.get_chat_member(
                             chat_id=callback.message.chat.id, user_id=user_id
