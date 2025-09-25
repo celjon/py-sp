@@ -37,7 +37,7 @@ class CheckMessageUseCase:
         self.spam_threshold = spam_threshold
         self.max_daily_spam = max_daily_spam
 
-    async def execute(self, message: Message) -> DetectionResult:
+    async def execute(self, message: Message, chat=None) -> DetectionResult:
         start_time = time.time()
 
         # Пользователь и контекст
@@ -63,6 +63,13 @@ class CheckMessageUseCase:
             await self._persist(message, user, result)
             return result
 
+        # Приоритет: system_prompt группы > system_prompt пользователя
+        system_prompt = None
+        if chat and chat.system_prompt:
+            system_prompt = chat.system_prompt
+        elif user.bothub_configured and user.system_prompt:
+            system_prompt = user.system_prompt
+
         user_context = {
             "message_count": user.message_count,
             "spam_score": user.spam_score,
@@ -70,25 +77,10 @@ class CheckMessageUseCase:
                 user.is_new_user if hasattr(user, "is_new_user") else user.message_count == 0
             ),
             "chat_id": getattr(message, "chat_id", None),
+            "user_bothub_token": user.bothub_token if user.bothub_configured else None,
+            "user_system_prompt": system_prompt,
+            "user_bothub_model": user.bothub_model if user.bothub_configured else None,
         }
-
-        # Настраиваем BotHub детектор если у пользователя есть токен
-        if user.bothub_token and user.bothub_configured:
-            try:
-                # Создаем BotHub Gateway с токеном пользователя
-                bothub_gateway = BotHubGateway(
-                    user_token=user.bothub_token,
-                    system_prompt=user.system_prompt
-                )
-                
-                # Создаем BotHub детектор
-                bothub_detector = BotHubDetector(bothub_gateway)
-                
-                # Добавляем в ensemble детектор
-                self.spam_detector.add_bothub_detector(bothub_gateway)
-            except Exception as e:
-                # Если не удалось настроить BotHub, продолжаем без него
-                pass
 
         # Ансамблевая детекция
         result = await self.spam_detector.detect(message, user_context)

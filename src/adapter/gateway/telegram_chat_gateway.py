@@ -197,3 +197,5 @@ class TelegramChatGateway:
         except Exception as e:
             logger.error(f"Error leaving chat {chat_id}: {e}")
             return False
+
+

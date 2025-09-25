@@ -86,6 +86,11 @@ class AutoChatDetectionHandler:
                     logger.info(f"Created new user: {owner_user_id}")
                 
                 # Создаем запись о чате
+                # Копируем system_prompt владельца, если он настроен
+                initial_system_prompt = None
+                if user.bothub_configured and user.system_prompt:
+                    initial_system_prompt = user.system_prompt
+
                 chat = Chat(
                     telegram_id=chat_id,
                     owner_user_id=owner_user_id,
@@ -96,6 +101,7 @@ class AutoChatDetectionHandler:
                     is_monitored=True,
                     spam_threshold=0.6,
                     is_active=True,
+                    system_prompt=initial_system_prompt,
                 )
                 
                 await self.chat_repository.create_chat(chat)
@@ -145,17 +151,24 @@ class AutoChatDetectionHandler:
         try:
             if message.new_chat_members:
                 chat_id = message.chat.id
-                
+
                 # Проверяем, что чат зарегистрирован
                 chat = await self.chat_repository.get_chat_by_telegram_id(chat_id)
                 if not chat or not chat.is_active:
                     return
-                
+
                 # Логируем новых участников
                 for member in message.new_chat_members:
                     if not member.is_bot:
                         logger.info(f"New member {member.id} joined chat {chat_id}")
-                
+
+            # Удаляем служебное сообщение
+            try:
+                await message.delete()
+                logger.info(f"🗑️ Удалено служебное сообщение о присоединении")
+            except Exception as e:
+                logger.debug(f"Could not delete service message: {e}")
+
         except Exception as e:
             logger.error(f"Error in handle_new_member: {e}")
 

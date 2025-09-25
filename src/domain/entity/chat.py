@@ -29,6 +29,9 @@ class Chat:
     spam_threshold: float = 0.6
     is_active: bool = True
 
+    # BotHub настройки для группы
+    system_prompt: Optional[str] = None
+
     # Дополнительные настройки
     settings: Dict[str, Any] = None
 

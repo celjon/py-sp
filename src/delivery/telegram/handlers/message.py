@@ -6,6 +6,123 @@ from typing import Dict, Any
 router = Router()
 
 
+@router.chat_member()
+async def handle_chat_member_update(chat_member: types.ChatMemberUpdated, **kwargs):
+    """Обработчик chat_member updates (присоединение по ссылке)"""
+    # Это событие возникает когда пользователь присоединяется по ссылке
+    # Просто игнорируем, так как служебное сообщение будет обработано в new_chat_members
+    pass
+
+
+@router.message(F.new_chat_members)
+async def handle_new_members_with_cas(message: types.Message, **kwargs):
+    """Обработчик новых участников с проверкой CAS"""
+    deps: Dict[str, Any] = kwargs.get("deps", {})
+    user_repo = deps.get("user_repository")
+    ensemble_detector = deps.get("ensemble_detector")
+
+    if not message.new_chat_members:
+        return
+
+    for new_member in message.new_chat_members:
+        try:
+            user_id = new_member.id
+            username = new_member.full_name
+
+            # Проверяем через CAS систему
+            if ensemble_detector and hasattr(ensemble_detector, 'cas_detector') and ensemble_detector.cas_detector:
+                try:
+                    from ....domain.entity.message import Message as DomainMessage
+
+                    dummy_message = DomainMessage(
+                        user_id=user_id,
+                        chat_id=message.chat.id,
+                        text="",
+                        username=new_member.username,
+                        first_name=new_member.first_name,
+                        last_name=new_member.last_name
+                    )
+
+                    cas_result = await ensemble_detector._check_cas(dummy_message, {"user_id": user_id})
+
+                    if cas_result and cas_result.is_spam:
+                        print(f"🚫 CAS: Пользователь {username} ({user_id}) забанен в CAS базе")
+                        await message.bot.ban_chat_member(
+                            chat_id=message.chat.id,
+                            user_id=user_id,
+                            revoke_messages=True
+                        )
+                        print(f"✅ Пользователь {user_id} автоматически забанен (CAS)")
+                        continue
+                except Exception as e:
+                    print(f"Error checking CAS for new member {user_id}: {e}")
+
+            # Проверяем, не забанен ли пользователь в нашей системе
+            if user_repo:
+                is_banned = await user_repo.is_user_banned(user_id, message.chat.id)
+                if is_banned:
+                    await message.bot.ban_chat_member(
+                        chat_id=message.chat.id, user_id=user_id, revoke_messages=True
+                    )
+                    continue
+
+                # Создаем пользователя в БД
+                existing_user = await user_repo.get_user(user_id)
+                if not existing_user:
+                    await user_repo.create_user(
+                        telegram_id=user_id,
+                        username=new_member.username,
+                        first_name=new_member.first_name,
+                        last_name=new_member.last_name
+                    )
+
+        except Exception as e:
+            print(f"Error processing new member {new_member.id}: {e}")
+
+    # Удаляем служебное сообщение
+    try:
+        await message.delete()
+        print(f"🗑️ Удалено служебное сообщение о присоединении")
+    except Exception as e:
+        print(f"Failed to delete new member message: {e}")
+
+
+@router.message(
+    F.chat.type.in_({"group", "supergroup"}) & (
+        F.left_chat_member |
+        F.new_chat_title |
+        F.new_chat_photo |
+        F.delete_chat_photo |
+        F.group_chat_created |
+        F.supergroup_chat_created |
+        F.pinned_message |
+        F.message_auto_delete_timer_changed |
+        F.forum_topic_created |
+        F.forum_topic_edited |
+        F.forum_topic_closed |
+        F.forum_topic_reopened |
+        F.video_chat_scheduled |
+        F.video_chat_started |
+        F.video_chat_ended
+    )
+)
+async def delete_all_service_messages(message: types.Message, **kwargs):
+    """Универсальный обработчик для удаления служебных сообщений"""
+    try:
+        await message.delete()
+        service_type = "неизвестное"
+        if message.left_chat_member:
+            service_type = f"выход пользователя {message.left_chat_member.full_name}"
+        elif message.new_chat_title:
+            service_type = "изменение названия"
+        elif message.pinned_message:
+            service_type = "закрепление сообщения"
+
+        print(f"🗑️ Удалено служебное сообщение: {service_type}")
+    except Exception as e:
+        print(f"Failed to delete service message: {e}")
+
+
 @router.message(Command("start"), F.chat.type == "private")
 async def cmd_start(message: types.Message):
     """Обработчик команды /start"""
@@ -182,96 +299,9 @@ async def cmd_unban(message: types.Message, **kwargs):
         await message.reply(f"❌ Ошибка разбана: {str(e)}")
 
 
-@router.message(F.new_chat_members)
-async def handle_new_members(message: types.Message, **kwargs):
-    """Обработчик новых участников группы"""
-    deps: Dict[str, Any] = kwargs.get("deps", {})
-    user_repo = deps.get("user_repository")
-
-    if not user_repo or not message.new_chat_members:
-        return
-
-    for new_member in message.new_chat_members:
-        try:
-            user_id = new_member.id
-            username = new_member.full_name
-
-            # Проверяем, не забанен ли пользователь в нашей системе
-            is_banned = await user_repo.is_user_banned(user_id, message.chat.id)
-
-            if is_banned:
-                print(
-                    f"🚫 Забаненный пользователь {username} ({user_id}) попытался зайти в чат {message.chat.id}"
-                )
-
-                # Уведомляем админов
-                admin_chat_id = deps.get("config", {}).get("admin_chat_id")
-                if admin_chat_id:
-                    try:
-                        notification_text = (
-                            f"⚠️ <b>Попытка входа забаненного пользователя</b>\n\n"
-                            f"👤 Пользователь: {username}\n"
-                            f"🆔 ID: <code>{user_id}</code>\n"
-                            f"💬 Чат: <code>{message.chat.id}</code>\n"
-                            f"📱 Чат: {message.chat.title or 'Без названия'}\n\n"
-                            f"⚡ Автоматически забанен повторно"
-                        )
-
-                        await message.bot.send_message(admin_chat_id, notification_text)
-                    except Exception as e:
-                        print(f"Failed to send admin notification: {e}")
-
-                # Немедленно баним снова
-                try:
-                    await message.bot.ban_chat_member(
-                        chat_id=message.chat.id, user_id=user_id, revoke_messages=True
-                    )
-                    print(f"✅ Забаненный пользователь {user_id} автоматически перебанен")
-                except Exception as e:
-                    print(f"❌ Не удалось перебанить пользователя {user_id}: {e}")
-
-            else:
-                # Пользователь не забанен - создаем его в БД если не существует
-                existing_user = await user_repo.get_user(user_id)
-                if not existing_user:
-                    try:
-                        await user_repo.create_user(
-                            telegram_id=user_id,
-                            username=new_member.username,
-                            first_name=new_member.first_name,
-                            last_name=new_member.last_name
-                        )
-                        print(f"✅ Создан новый пользователь в БД: {username} ({user_id})")
-                    except Exception as e:
-                        print(f"❌ Ошибка создания пользователя {user_id}: {e}")
-                
-                print(
-                    f"👋 Новый участник: {username} ({user_id}) присоединился к чату {message.chat.id}"
-                )
-
-                # Можно добавить дополнительные проверки для новых пользователей
-                # Например, проверку через CAS или другие антиспам базы
-
-        except Exception as e:
-            print(f"Error processing new member {new_member.id}: {e}")
 
 
-@router.message(F.left_chat_member)
-async def handle_left_member(message: types.Message, **kwargs):
-    """Обработчик покинувших участников"""
-    if not message.left_chat_member:
-        return
-
-    left_member = message.left_chat_member
-    username = left_member.full_name
-    user_id = left_member.id
-
-    print(f"👋 Участник покинул чат: {username} ({user_id}) из чата {message.chat.id}")
-
-    # Можно добавить логику для очистки данных пользователя или статистики
-
-
-@router.message(F.chat.type.in_({"group", "channel"}) & ~F.text.startswith('/'))
+@router.message(F.chat.type.in_({"group", "supergroup", "channel"}) & ~F.text.startswith('/'))
 async def handle_group_message(message: types.Message, **kwargs):
     """Основной обработчик сообщений в группах (исключая команды)"""
 
@@ -280,9 +310,18 @@ async def handle_group_message(message: types.Message, **kwargs):
     # Получаем use case для проверки сообщений
     check_message_usecase = deps.get("check_message_usecase")
     ban_user_usecase = deps.get("ban_user_usecase")
+    chat_repository = deps.get("chat_repository")
 
     if not check_message_usecase:
         return
+
+    # Получаем информацию о чате
+    chat = None
+    if chat_repository:
+        try:
+            chat = await chat_repository.get_chat_by_telegram_id(message.chat.id)
+        except Exception as e:
+            print(f"Error getting chat: {e}")
 
     # Создаем доменную сущность Message
     from ....domain.entity.message import Message as DomainMessage
@@ -304,8 +343,8 @@ async def handle_group_message(message: types.Message, **kwargs):
     try:
         start_time = time.time()
 
-        # Проверяем сообщение на спам
-        detection_result = await check_message_usecase.execute(domain_message)
+        # Проверяем сообщение на спам (передаем chat для использования system_prompt группы)
+        detection_result = await check_message_usecase.execute(domain_message, chat=chat)
 
         processing_time = (time.time() - start_time) * 1000
 

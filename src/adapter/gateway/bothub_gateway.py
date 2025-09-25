@@ -11,13 +11,15 @@ from typing import Dict, Any, Optional, Tuple, List
 import httpx
 from openai import AsyncOpenAI
 
+from src.domain.service.prompt_factory import PromptFactory
+
 logger = logging.getLogger(__name__)
 
 
 class BotHubGateway:
     """
     BotHub Gateway - OpenAI-совместимый клиент для детекции спама
-    
+
     Features:
     - OpenAI-совместимый API через BotHub
     - Поддержка пользовательских токенов
@@ -26,21 +28,78 @@ class BotHubGateway:
     - Health checks и мониторинг
     """
 
-    def __init__(self, user_token: str, system_prompt: str = None, config: Dict[str, Any] = None):
+    @staticmethod
+    async def get_available_models(token: str) -> list[dict]:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    'https://bothub.chat/api/v2/model/list?children=1',
+                    headers={
+                        'Authorization': f'Bearer {token}',
+                        'Content-Type': 'application/json'
+                    },
+                    timeout=10.0
+                )
+                if response.status_code == 200:
+                    models = response.json()
+                    text_models = [
+                        model for model in models
+                        if 'TEXT_TO_TEXT' in model.get('features', [])
+                    ]
+                    return text_models
+                return []
+        except Exception as e:
+            logger.error(f"Error fetching models: {e}")
+            return []
+
+    @staticmethod
+    async def verify_token(token: str) -> bool:
+        """
+        Проверяет валидность токена BotHub
+
+        Args:
+            token: Токен для проверки
+
+        Returns:
+            bool: True если токен валиден, False иначе
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    'https://bothub.chat/api/v2/openai/v1/chat/completions',
+                    headers={
+                        'Authorization': f'Bearer {token}',
+                        'Content-Type': 'application/json'
+                    },
+                    json={
+                        'model': 'gpt-4o-mini',
+                        'messages': [{'role': 'user', 'content': 'test'}],
+                        'max_tokens': 5
+                    },
+                    timeout=10.0
+                )
+                return response.status_code in [200, 429]  # 429 = rate limit, но токен валиден
+        except Exception as e:
+            logger.error(f"Error verifying token: {e}")
+            return False
+
+    def __init__(self, user_token: str, user_instructions: str = None, user_model: str = None, config: Dict[str, Any] = None):
         """
         Инициализация BotHub Gateway
-        
+
         Args:
             user_token: Токен пользователя BotHub
-            system_prompt: Системный промпт для детекции
+            user_instructions: Пользовательские инструкции для детекции (без формата ответа)
+            user_model: Модель пользователя для детекции
             config: Дополнительная конфигурация
         """
         self.user_token = user_token
-        self.system_prompt = system_prompt or self._get_default_prompt()
+        self.user_instructions = user_instructions or PromptFactory.get_default_user_instructions()
+        self.system_prompt = PromptFactory.build_spam_detection_prompt(self.user_instructions)
         self.config = config or {}
-        
+
         # Настройки из конфига
-        self.model = self.config.get("model", "gpt-4o-mini")
+        self.model = user_model or self.config.get("model", "gpt-4o-mini")
         self.max_tokens = self.config.get("max_tokens", 150)
         self.temperature = self.config.get("temperature", 0.0)
         self.timeout = self.config.get("timeout", 10.0)
@@ -187,15 +246,16 @@ User context:
 
         return self._last_health_status
 
-    def update_system_prompt(self, new_prompt: str) -> None:
+    def update_user_instructions(self, new_instructions: str) -> None:
         """
-        Обновить системный промпт
-        
+        Обновить пользовательские инструкции
+
         Args:
-            new_prompt: Новый системный промпт
+            new_instructions: Новые пользовательские инструкции
         """
-        self.system_prompt = new_prompt
-        logger.info("🔗 BotHub системный промпт обновлен")
+        self.user_instructions = new_instructions
+        self.system_prompt = PromptFactory.build_spam_detection_prompt(self.user_instructions)
+        logger.info("🔗 BotHub пользовательские инструкции обновлены")
 
     def update_user_token(self, new_token: str) -> None:
         """
@@ -212,35 +272,6 @@ User context:
         )
         logger.info("🔗 BotHub токен пользователя обновлен")
 
-    def _get_default_prompt(self) -> str:
-        """Системный промпт для детекции спама"""
-        return """Ты эксперт по определению спама в сообщениях чатов. Анализируй быстро и точно.
-
-ЗАДАЧА: Определи, является ли сообщение спамом.
-
-СПАМ это:
-- Реклама товаров/услуг без разрешения
-- Призывы писать в личные сообщения для "заработка"
-- Финансовые схемы и "быстрые деньги"
-- Массовые рассылки и копипаста
-- Навязчивые ссылки на внешние ресурсы
-- Предложения инвестиций, криптовалют, форекса
-
-НЕ СПАМ это:
-- Обычное общение и вопросы
-- Обмен опытом по теме чата
-- Мемы, шутки, реакции
-- Конструктивная критика
-- Информативные ссылки по теме
-
-ФОРМАТ ОТВЕТА (только JSON):
-{
-  "is_spam": boolean,
-  "confidence": float (0.0-1.0),
-  "reason": "краткое объяснение на русском"
-}
-
-Будь консервативным - при сомнениях классифицируй как НЕ спам."""
 
     def get_stats(self) -> Dict[str, Any]:
         """Получить статистику использования"""
@@ -261,3 +292,5 @@ User context:
             "timeout": self.timeout,
             "base_url": self.base_url
         }
+
+

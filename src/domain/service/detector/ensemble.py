@@ -310,24 +310,23 @@ class EnsembleDetector:
                     f"[TIME] Превышен лимит времени ({elapsed_time:.2f}s), пропускаем BotHub"
                 )
             else:
-                # Вызываем BotHub только в "серой зоне" RUSpam
+                # Вызываем BotHub ТОЛЬКО если RUSpam дал НЕ спам
                 ruspam_confidence = max_confidence if is_spam_detected else 0.0
-                should_call_bothub = (
-                    self.bothub_min_ruspam_confidence <= ruspam_confidence < self.high_confidence_threshold
-                )
-                
+
+                # Новая логика: BotHub вызывается только когда RUSpam сказал "не спам"
+                should_call_bothub = not is_spam_detected
+
                 if should_call_bothub:
-                    logger.info(f"[BOTHUB] Вызываем BotHub для проверки (RUSpam уверенность: {ruspam_confidence:.3f})")
+                    logger.info(f"[BOTHUB] Вызываем BotHub для проверки (RUSpam: не спам, уверенность: {ruspam_confidence:.3f})")
                     bothub_result = await self._check_bothub(message, user_context, text, ruspam_confidence)
                     if bothub_result:
                         results.append(bothub_result)
                         if bothub_result.is_spam:
-                            if not is_spam_detected:  # BotHub как первичный детектор
-                                is_spam_detected = True
-                                primary_reason = DetectionReason.BOTHUB_DETECTED
+                            is_spam_detected = True
+                            primary_reason = DetectionReason.BOTHUB_DETECTED
                             max_confidence = max(max_confidence, bothub_result.confidence)
                 else:
-                    logger.debug(f"[BOTHUB] Пропускаем BotHub (RUSpam уверенность: {ruspam_confidence:.3f}, зона: {self.bothub_min_ruspam_confidence}-{self.high_confidence_threshold})")
+                    logger.debug(f"[BOTHUB] Пропускаем BotHub (RUSpam обнаружил спам: {ruspam_confidence:.3f})")
 
             # Генерируем финальное решение
             notes = self._generate_notes(results, detected_language, is_spam_detected)
@@ -468,10 +467,14 @@ class EnsembleDetector:
         detector_name = "bothub"
 
         if (
-            not self.bothub_detector
-            or not self.use_bothub_fallback
+            not self.use_bothub_fallback
             or len(text.strip()) < self.bothub_min_length
         ):
+            return None
+
+        # Проверяем, есть ли у пользователя токен BotHub
+        user_bothub_token = user_context.get("user_bothub_token") if user_context else None
+        if not user_bothub_token:
             return None
 
         # Проверяем circuit breaker
@@ -483,9 +486,19 @@ class EnsembleDetector:
         logger.info(f"[BOTHUB] Запускаем проверку (RUSpam уверенность: {ruspam_confidence:.3f}, длина текста: {len(text)})")
 
         try:
+            # Создаем BotHub детектор на лету с токеном пользователя
+            from ....adapter.gateway.bothub_gateway import BotHubGateway
+
+            user_bothub_gateway = BotHubGateway(
+                user_token=user_bothub_token,
+                user_instructions=user_context.get("user_system_prompt"),
+                user_model=user_context.get("user_bothub_model")
+            )
+            user_bothub_detector = BotHubDetector(user_bothub_gateway)
+
             start_bothub = time.time()
             bothub_result = await asyncio.wait_for(
-                self.bothub_detector.detect(message, user_context), timeout=self.bothub_timeout
+                user_bothub_detector.detect(message, user_context), timeout=self.bothub_timeout
             )
             processing_time = (time.time() - start_bothub) * 1000
 

@@ -43,6 +43,7 @@ class User:
     bothub_token: Optional[str] = None
     system_prompt: Optional[str] = None
     bothub_configured: bool = False
+    bothub_model: Optional[str] = None
 
     # Системные поля
     id: Optional[int] = None

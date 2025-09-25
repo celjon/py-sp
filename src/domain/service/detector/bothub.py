@@ -273,3 +273,5 @@ class BotHubDetector:
                 "error": str(e),
                 "stats": self.get_stats()
             }
+
+

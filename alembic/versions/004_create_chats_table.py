@@ -58,3 +58,5 @@ def downgrade() -> None:
     
     # Удаляем таблицу
     op.drop_table('chats')
+
+

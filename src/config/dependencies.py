@@ -286,6 +286,9 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         if cas_gateway:
             ensemble_detector.add_cas_detector(cas_gateway)
 
+        # Добавляем RUSpam детектор (критический компонент)
+        ensemble_detector.add_ruspam_detector()
+
         # BotHub детектор будет создаваться динамически с токеном пользователя
         # ensemble_detector.add_bothub_detector(bothub_gateway) - вызывается при необходимости
 

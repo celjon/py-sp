@@ -25,14 +25,14 @@ class ChatRepository:
     async def create_chat(self, chat: Chat) -> Chat:
         """Создает новый чат"""
         query = """
-        INSERT INTO chats (chat_id, owner_user_id, title, chat_type, description, username, 
-                          is_monitored, spam_threshold, is_active, settings, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        INSERT INTO chats (chat_id, owner_user_id, title, chat_type, description, username,
+                          is_monitored, spam_threshold, is_active, system_prompt, settings, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id, created_at, updated_at
         """
-        
+
         now = datetime.now(timezone.utc)
-        
+
         async with self.db.acquire() as conn:
             row = await conn.fetchrow(
                 query,
@@ -45,15 +45,16 @@ class ChatRepository:
                 chat.is_monitored,
                 chat.spam_threshold,
                 chat.is_active,
+                chat.system_prompt,
                 json.dumps(chat.settings or {}),
                 now,
                 now,
             )
-            
+
             chat.id = row["id"]
             chat.created_at = row["created_at"]
             chat.updated_at = row["updated_at"]
-            
+
             logger.info(f"✅ Чат создан: {chat.telegram_id} (владелец: {chat.owner_user_id})")
             return chat
 
@@ -99,15 +100,15 @@ class ChatRepository:
     async def update_chat(self, chat: Chat) -> Chat:
         """Обновляет чат"""
         query = """
-        UPDATE chats 
-        SET title = $1, description = $2, username = $3, is_monitored = $4, 
-            spam_threshold = $5, is_active = $6, settings = $7, updated_at = $8
-        WHERE id = $9
+        UPDATE chats
+        SET title = $1, description = $2, username = $3, is_monitored = $4,
+            spam_threshold = $5, is_active = $6, system_prompt = $7, settings = $8, updated_at = $9
+        WHERE id = $10
         RETURNING updated_at
         """
-        
+
         now = datetime.now(timezone.utc)
-        
+
         async with self.db.acquire() as conn:
             row = await conn.fetchrow(
                 query,
@@ -117,11 +118,12 @@ class ChatRepository:
                 chat.is_monitored,
                 chat.spam_threshold,
                 chat.is_active,
+                chat.system_prompt,
                 json.dumps(chat.settings or {}),
                 now,
                 chat.id,
             )
-            
+
             chat.updated_at = row["updated_at"]
             logger.info(f"✅ Чат обновлен: {chat.telegram_id}")
             return chat
@@ -201,6 +203,7 @@ class ChatRepository:
             is_monitored=row["is_monitored"],
             spam_threshold=row["spam_threshold"],
             is_active=row["is_active"],
+            system_prompt=row.get("system_prompt"),
             settings=row["settings"] or {},
             created_at=row["created_at"],
             updated_at=row["updated_at"],
