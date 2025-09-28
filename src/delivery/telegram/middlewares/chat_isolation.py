@@ -1,4 +1,3 @@
-# src/delivery/telegram/middlewares/chat_isolation.py
 """
 Middleware для изоляции чатов - проверяет владение группами
 """
@@ -34,13 +33,11 @@ class ChatIsolationMiddleware(BaseMiddleware):
         Проверяет изоляцию чатов для сообщений и callback запросов
         """
         
-        # Получаем пользователя из данных
         user: User = data.get("user")
         if not user:
             logger.warning("No user in data, skipping chat isolation check")
             return await handler(event, data)
 
-        # Обрабатываем только сообщения и callback запросы
         if isinstance(event, (Message, CallbackQuery)):
             chat_id = None
             
@@ -53,11 +50,9 @@ class ChatIsolationMiddleware(BaseMiddleware):
                 logger.warning("No chat_id found in event")
                 return await handler(event, data)
 
-            # Пропускаем приватные чаты
             if isinstance(event, Message) and event.chat.type == "private":
                 return await handler(event, data)
 
-            # Проверяем владение группой
             is_owner = await self.chat_repository.is_chat_owned_by_user(chat_id, user.telegram_id)
             
             if not is_owner:
@@ -65,7 +60,6 @@ class ChatIsolationMiddleware(BaseMiddleware):
                     f"User {user.telegram_id} attempted to access chat {chat_id} without ownership"
                 )
                 
-                # Отправляем сообщение об ошибке
                 if isinstance(event, Message):
                     await event.reply(
                         "❌ У вас нет прав для работы с этой группой.\n\n"
@@ -78,9 +72,8 @@ class ChatIsolationMiddleware(BaseMiddleware):
                         show_alert=True
                     )
                 
-                return  # Не передаем обработку дальше
+                return
 
-            # Добавляем информацию о чате в данные
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(chat_id, user.telegram_id)
             if chat:
                 data["chat"] = chat
@@ -109,24 +102,19 @@ class ChatOwnershipMiddleware(BaseMiddleware):
         Проверяет владение чатом и добавляет информацию в данные
         """
         
-        # Получаем пользователя из данных
         user: User = data.get("user")
         if not user:
             return await handler(event, data)
 
-        # Обрабатываем только сообщения
         if isinstance(event, Message):
             chat_id = event.chat.id
 
-            # Пропускаем приватные чаты
             if event.chat.type == "private":
                 return await handler(event, data)
 
-            # Проверяем владение группой
             is_owner = await self.chat_repository.is_chat_owned_by_user(chat_id, user.telegram_id)
             
             if is_owner:
-                # Добавляем информацию о чате в данные
                 chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(chat_id, user.telegram_id)
                 if chat:
                     data["chat"] = chat

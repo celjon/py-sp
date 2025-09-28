@@ -1,4 +1,3 @@
-# src/delivery/telegram/handlers/auto_chat_detection.py
 """
 Автоматическое определение владельца группы при добавлении бота
 """
@@ -43,19 +42,16 @@ class AutoChatDetectionHandler:
         Автоматически определяет владельца и создает запись в БД
         """
         try:
-            # Проверяем, что бот был добавлен (статус изменился)
             if event.new_chat_member.status in ["member", "administrator"]:
                 chat_id = event.chat.id
                 
                 logger.info(f"Bot added to group {chat_id}: {event.chat.title}")
                 
-                # Получаем информацию о чате
                 chat_info = await self.telegram_chat_gateway.get_chat_info(chat_id)
                 if not chat_info:
                     logger.error(f"Could not get chat info for {chat_id}")
                     return
                 
-                # Получаем владельца чата
                 owner_info = await self.telegram_chat_gateway.get_chat_owner(chat_id)
                 if not owner_info:
                     logger.warning(f"No owner found for chat {chat_id}")
@@ -65,18 +61,20 @@ class AutoChatDetectionHandler:
                 owner_user_id = owner_info["user_id"]
                 logger.info(f"Chat {chat_id} owner: {owner_user_id}")
                 
-                # Проверяем, есть ли уже запись о чате
                 existing_chat = await self.chat_repository.get_chat_by_telegram_id(chat_id)
                 if existing_chat:
-                    logger.info(f"Chat {chat_id} already exists, owner: {existing_chat.owner_user_id}")
+                    logger.info(f"Chat {chat_id} already exists, owner: {existing_chat.owner_user_id} - skipping creation")
                     if existing_chat.owner_user_id != owner_user_id:
                         await self._send_ownership_conflict_message(chat_id, existing_chat.owner_user_id, owner_user_id)
+                    else:
+                        if not existing_chat.is_active:
+                            existing_chat.is_active = True
+                            await self.chat_repository.update_chat(existing_chat)
+                            logger.info(f"Chat {chat_id} reactivated")
                     return
                 
-                # Получаем или создаем пользователя-владельца
                 user = await self.user_repository.get_user(owner_user_id)
                 if not user:
-                    # Создаем нового пользователя
                     user = await self.user_repository.create_user(
                         telegram_id=owner_user_id,
                         username=owner_info.get("username"),
@@ -85,8 +83,6 @@ class AutoChatDetectionHandler:
                     )
                     logger.info(f"Created new user: {owner_user_id}")
                 
-                # Создаем запись о чате
-                # Копируем system_prompt владельца, если он настроен
                 initial_system_prompt = None
                 if user.bothub_configured and user.system_prompt:
                     initial_system_prompt = user.system_prompt
@@ -106,7 +102,6 @@ class AutoChatDetectionHandler:
                 
                 await self.chat_repository.create_chat(chat)
                 
-                # Отправляем приветственное сообщение ВЛАДЕЛЬЦУ в личку
                 await self._send_welcome_message_to_owner(chat_id, owner_user_id, chat_info.get("title"))
                 
                 logger.info(f"Chat {chat_id} automatically registered for user {owner_user_id}")
@@ -123,13 +118,11 @@ class AutoChatDetectionHandler:
         Обрабатывает удаление бота из группы
         """
         try:
-            # Проверяем, что бот был удален
             if event.new_chat_member.status in ["left", "kicked"]:
                 chat_id = event.chat.id
                 
                 logger.info(f"Bot removed from group {chat_id}: {event.chat.title}")
                 
-                # Деактивируем чат в БД
                 chat = await self.chat_repository.get_chat_by_telegram_id(chat_id)
                 if chat:
                     chat.deactivate()
@@ -152,17 +145,14 @@ class AutoChatDetectionHandler:
             if message.new_chat_members:
                 chat_id = message.chat.id
 
-                # Проверяем, что чат зарегистрирован
                 chat = await self.chat_repository.get_chat_by_telegram_id(chat_id)
                 if not chat or not chat.is_active:
                     return
 
-                # Логируем новых участников
                 for member in message.new_chat_members:
                     if not member.is_bot:
                         logger.info(f"New member {member.id} joined chat {chat_id}")
 
-            # Удаляем служебное сообщение
             try:
                 await message.delete()
                 logger.info(f"🗑️ Удалено служебное сообщение о присоединении")
@@ -171,6 +161,34 @@ class AutoChatDetectionHandler:
 
         except Exception as e:
             logger.error(f"Error in handle_new_member: {e}")
+
+    async def handle_group_to_supergroup_migration(
+        self,
+        message: types.Message,
+        **kwargs
+    ) -> None:
+        """
+        Обрабатывает миграцию группы в супергруппу
+        Обновляет chat_id в базе данных
+        """
+        try:
+            old_chat_id = message.chat.id
+            new_chat_id = message.migrate_to_chat_id
+
+            logger.info(f"Group migration detected: {old_chat_id} -> {new_chat_id}")
+
+            old_chat = await self.chat_repository.get_chat_by_telegram_id(old_chat_id)
+            if old_chat:
+                old_chat.telegram_id = new_chat_id
+                old_chat.type = ChatType.SUPERGROUP
+
+                await self.chat_repository.update_chat(old_chat)
+                logger.info(f"Chat {old_chat_id} migrated to supergroup {new_chat_id}")
+            else:
+                logger.warning(f"Chat {old_chat_id} not found in database during migration")
+
+        except Exception as e:
+            logger.error(f"Error handling group migration: {e}")
 
     async def _send_welcome_message_to_owner(self, chat_id: int, owner_user_id: int, chat_title: str) -> None:
         """Отправляет приветственное сообщение владельцу в личку"""
@@ -183,18 +201,41 @@ class AutoChatDetectionHandler:
 
 ✅ <b>Автоматическая настройка завершена!</b>
 
-🔧 <b>Доступные команды:</b>
-• /my_chats - ваши группы
-• /chat_settings - настройки группы
-• /bothub_token - настройка токена BotHub
-• /bothub_status - статус BotHub
+⚠️ <b>ВАЖНО:</b> Для корректной работы антиспама необходимо:
+1. 👑 <b>Назначить боту права администратора</b> в группе (для банов и удаления сообщений)
+2. 🔑 <b>Настроить токен BotHub</b> командой /bothub (для ИИ детекции)
 
-⚠️ <b>Важно:</b> Для работы антиспама необходимо настроить токен BotHub командой /bothub_token
+<b>💫 Интерактивное управление (в личном чате):</b>
+/manage - 🏠 Управление группами с интерактивным меню:
+   • Включение/выключение антиспам защиты
+   • Настройка порога спама (0.0 - 1.0)
+   • Просмотр статистики группы
+   • Просмотр забаненных пользователей с разбаном
+   • Управление уведомлениями о банах
+   • Настройка системного промпта для ИИ
+
+/bothub - 🤖 Настройки BotHub ИИ (клавиатура)
+
+<b>🛡️ Антиспам система:</b>
+• Автоматическая детекция спама через CAS + RUSpam + BotHub ИИ
+• Настраиваемый порог срабатывания (по умолчанию 0.7)
+• Уведомления владельцу группы о банах с кнопкой разбана
+• Возможность отключения защиты для конкретной группы
+• Все управление через интерактивные меню в личном чате
+
+<b>🤖 Справка по BotHub:</b>
+BotHub - это API для работы с языковыми моделями ИИ.
+Бот использует его для детекции спама.
+
+🔗 <b>Получение токена BotHub:</b>
+1. Перейдите на https://bothub.chat
+2. Зарегистрируйтесь или войдите в аккаунт
+3. Получите токен доступа к API
+4. Используйте /bothub для настройки
 
 🤖 Бот готов к работе!
             """
 
-            # Отправляем сообщение ВЛАДЕЛЬЦУ в личку
             await self.telegram_chat_gateway.bot.send_message(owner_user_id, welcome_text, parse_mode="HTML")
 
         except Exception as e:
@@ -214,7 +255,6 @@ class AutoChatDetectionHandler:
 
             await self.telegram_chat_gateway.bot.send_message(chat_id, error_text, parse_mode="HTML")
             
-            # Покидаем группу
             await self.telegram_chat_gateway.leave_chat(chat_id)
             
         except Exception as e:
@@ -252,7 +292,6 @@ def register_auto_chat_detection_handlers(
     """Регистрирует обработчики автоматического определения чатов"""
     handler = AutoChatDetectionHandler(user_repository, chat_repository, telegram_chat_gateway)
 
-    # Обработчик добавления/удаления бота из группы (используем my_chat_member, а не message)
     dp.my_chat_member.register(
         handler.handle_bot_added_to_group,
         ChatMemberUpdatedFilter(IS_NOT_MEMBER >> IS_MEMBER)
@@ -263,10 +302,14 @@ def register_auto_chat_detection_handlers(
         ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER)
     )
 
-    # Обработчик новых участников (это остается на message)
     dp.message.register(
         handler.handle_new_member,
         F.new_chat_members
+    )
+
+    dp.message.register(
+        handler.handle_group_to_supergroup_migration,
+        F.migrate_to_chat_id
     )
 
     logger.info("🤖 Auto chat detection handlers registered")

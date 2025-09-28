@@ -18,24 +18,22 @@ class Chat:
     """Доменная сущность чата с поддержкой владения"""
 
     telegram_id: int
-    owner_user_id: int  # ID пользователя-владельца
+    owner_user_id: int
     title: Optional[str] = None
     type: ChatType = ChatType.GROUP
     description: Optional[str] = None
     username: Optional[str] = None
 
-    # Настройки антиспама
     is_monitored: bool = True
     spam_threshold: float = 0.6
     is_active: bool = True
 
-    # BotHub настройки для группы
     system_prompt: Optional[str] = None
 
-    # Дополнительные настройки
+    ban_notifications_enabled: bool = True
+
     settings: Dict[str, Any] = None
 
-    # Системные поля
     id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

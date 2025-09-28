@@ -1,4 +1,3 @@
-# src/domain/service/detector/cas.py
 """
 Production-Ready CAS (Combot Anti-Spam) Detector
 Высокопроизводительная проверка пользователей в базе забаненных
@@ -34,15 +33,12 @@ class CASDetector:
         self.cas_gateway = cas_gateway
         self.config = config or {}
 
-        # Performance settings
-        self.cache_ttl = self.config.get("cache_ttl", 3600)  # 1 час кэш
-        self.timeout = self.config.get("timeout", 1.0)  # 1 секунда timeout
+        self.cache_ttl = self.config.get("cache_ttl", 3600)
+        self.timeout = self.config.get("timeout", 1.0)
 
-        # Confidence settings
         self.banned_confidence = self.config.get("banned_confidence", 0.95)
         self.not_banned_confidence = self.config.get("not_banned_confidence", 0.05)
 
-        # Metrics
         self._total_checks = 0
         self._cache_hits = 0
         self._api_calls = 0
@@ -72,15 +68,12 @@ class CASDetector:
         logger.debug(f"[SEARCH] CAS проверка пользователя: {user_id} (@{username})")
 
         try:
-            # Проверяем пользователя в CAS
             cas_result = await self.cas_gateway.check_cas(user_id)
             self._api_calls += 1
 
             processing_time_ms = (time.time() - start_time) * 1000
 
-            # cas_result это bool, а не dict
             if cas_result:
-                # Пользователь забанен
                 self._banned_users += 1
 
                 logger.warning(f"[ALERT] CAS BAN: пользователь {user_id} забанен")
@@ -93,7 +86,6 @@ class CASDetector:
                     processing_time_ms=processing_time_ms,
                 )
             else:
-                # Пользователь не найден в базе банов
                 logger.debug(f"[OK] CAS: пользователь {user_id} чист ({processing_time_ms:.1f}ms)")
 
                 return DetectorResult(
@@ -110,7 +102,6 @@ class CASDetector:
 
             logger.error(f"[WARN] CAS проверка failed для пользователя {user_id}: {e}")
 
-            # Graceful degradation - возвращаем "не спам" при ошибке
             return DetectorResult(
                 detector_name="CAS",
                 is_spam=False,
@@ -133,14 +124,13 @@ class CASDetector:
         results = {}
 
         try:
-            # Используем batch API если доступно
             if hasattr(self.cas_gateway, "check_cas_batch"):
                 logger.info(f"[SEARCH] CAS batch проверка {len(user_ids)} пользователей")
 
                 batch_results = await self.cas_gateway.check_cas_batch(user_ids)
 
                 for user_id, cas_result in batch_results.items():
-                    if cas_result:  # cas_result is bool
+                    if cas_result:
                         results[user_id] = DetectorResult(
                             detector_name="CAS",
                             is_spam=True,
@@ -155,14 +145,13 @@ class CASDetector:
                             details="User not banned",
                         )
             else:
-                # Fallback: проверяем по одному
                 logger.info(f"[SEARCH] CAS последовательная проверка {len(user_ids)} пользователей")
 
                 for user_id in user_ids:
                     try:
                         cas_result = await self.cas_gateway.check_cas(user_id)
 
-                        if cas_result:  # cas_result is bool
+                        if cas_result:
                             results[user_id] = DetectorResult(
                                 detector_name="CAS",
                                 is_spam=True,
@@ -189,7 +178,6 @@ class CASDetector:
         except Exception as e:
             logger.error(f"[ERROR] CAS batch проверка failed: {e}")
 
-            # Fallback: все пользователи считаются чистыми
             for user_id in user_ids:
                 results[user_id] = DetectorResult(
                     detector_name="CAS",
@@ -228,10 +216,8 @@ class CASDetector:
             Статус здоровья системы
         """
         try:
-            # Выполняем тестовый запрос к CAS API
             start_time = time.time()
 
-            # Проверяем тестовый ID (обычно используется ID = 1)
             test_result = await self.cas_gateway.check_cas(1)
 
             response_time_ms = (time.time() - start_time) * 1000
@@ -271,7 +257,6 @@ class CASDetector:
         logger.info(f"[WARM] Прогрев CAS кэша для {len(common_user_ids)} пользователей...")
 
         try:
-            # Используем batch проверку если возможно
             results = await self.check_multiple_users(common_user_ids)
 
             cache_entries = len([r for r in results.values() if not r.error])

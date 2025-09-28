@@ -23,29 +23,29 @@ class User:
     last_name: Optional[str] = None
     status: UserStatus = UserStatus.ACTIVE
 
-    # Статистика
     message_count: int = 0
     spam_score: float = 0.0
     
-    # Счетчик спама с ежедневным сбросом
     daily_spam_count: int = 0
     last_spam_reset_date: Optional[datetime] = None
 
-    # Временные метки
     first_message_at: Optional[datetime] = None
     last_message_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
-    # Флаги
     is_admin: bool = False
 
-    # BotHub настройки
     bothub_token: Optional[str] = None
     system_prompt: Optional[str] = None
     bothub_configured: bool = False
     bothub_model: Optional[str] = None
 
-    # Системные поля
+    bothub_total_requests: int = 0
+    bothub_total_time: float = 0.0
+    bothub_last_request: Optional[datetime] = None
+
+    ban_notifications_enabled: bool = True
+
     id: Optional[int] = None
 
     @property
@@ -99,7 +99,6 @@ class User:
 
     def update_spam_score(self, score: float) -> None:
         """Обновляет спам-скор пользователя"""
-        # Используем экспоненциальное сглаживание
         alpha = 0.3
         self.spam_score = alpha * score + (1 - alpha) * self.spam_score
 
@@ -128,7 +127,6 @@ class User:
             self.last_spam_reset_date = now
             return
         
-        # Сбрасываем если прошел день
         if (now - self.last_spam_reset_date).days >= 1:
             self.reset_daily_spam_count()
 

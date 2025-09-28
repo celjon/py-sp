@@ -1,4 +1,3 @@
-# src/lib/clients/postgres_client.py
 """
 Production-Ready PostgreSQL Client
 Высокопроизводительный клиент с connection pooling и monitoring
@@ -71,12 +70,11 @@ class PostgresClient:
         self.query_timeout = query_timeout
         self.server_settings = server_settings or {
             "application_name": "antispam-api",
-            "jit": "off",  # Отключаем JIT для стабильности
+            "jit": "off",
         }
 
         self.pool: Optional[asyncpg.Pool] = None
 
-        # Performance metrics
         self._total_queries = 0
         self._total_query_time = 0.0
         self._failed_queries = 0
@@ -102,12 +100,10 @@ class PostgresClient:
                 max_size=self.max_size,
                 command_timeout=self.command_timeout,
                 server_settings=self.server_settings,
-                # Connection lifecycle hooks
                 init=self._connection_init_hook,
                 setup=self._connection_setup_hook,
             )
 
-            # Проверяем соединение
             async with self.pool.acquire() as conn:
                 version = await conn.fetchval("SELECT version()")
                 logger.info(f"[OK] PostgreSQL подключен: {version[:50]}...")
@@ -137,8 +133,6 @@ class PostgresClient:
     async def _connection_setup_hook(self, conn):
         """Hook для настройки соединения"""
         try:
-            # Настраиваем кастомные типы если нужно
-            # await conn.set_type_codec('json', encoder=json.dumps, decoder=json.loads, schema='pg_catalog')
             pass
         except Exception as e:
             logger.warning(f"[WARN] Connection setup warning: {e}")
@@ -180,9 +174,8 @@ class PostgresClient:
                 except Exception as e:
                     logger.error(f"[WARN] Ошибка возврата соединения в пул: {e}")
 
-            # Записываем время получения соединения
             acquisition_time = time.time() - start_time
-            if acquisition_time > 1.0:  # Предупреждаем если > 1 секунды
+            if acquisition_time > 1.0:
                 logger.warning(f"[WARN] Медленное получение соединения: {acquisition_time:.2f}s")
 
     async def execute(self, query: str, *args, timeout: float = None) -> str:
@@ -209,7 +202,7 @@ class PostgresClient:
                 query_time = time.time() - start_time
                 self._total_query_time += query_time
 
-                if query_time > 1.0:  # Медленный запрос
+                if query_time > 1.0:
                     logger.warning(f"[WARN] Медленный execute: {query_time:.2f}s - {query[:100]}")
 
                 return result
@@ -244,7 +237,7 @@ class PostgresClient:
                 query_time = time.time() - start_time
                 self._total_query_time += query_time
 
-                if query_time > 0.5:  # Медленный запрос
+                if query_time > 0.5:
                     logger.warning(f"[WARN] Медленный fetchrow: {query_time:.2f}s - {query[:100]}")
 
                 return result
@@ -279,7 +272,7 @@ class PostgresClient:
                 query_time = time.time() - start_time
                 self._total_query_time += query_time
 
-                if query_time > 1.0 or len(result) > 1000:  # Медленный или большой запрос
+                if query_time > 1.0 or len(result) > 1000:
                     logger.warning(
                         f"[WARN] Медленный/большой fetch: {query_time:.2f}s, {len(result)} строк - {query[:100]}"
                     )
@@ -340,13 +333,13 @@ class PostgresClient:
             async with self.acquire() as conn:
                 await asyncio.wait_for(
                     conn.executemany(query, args_list),
-                    timeout=timeout or (self.query_timeout * 2),  # Больше времени для batch
+                    timeout=timeout or (self.query_timeout * 2),
                 )
 
                 query_time = time.time() - start_time
                 self._total_query_time += query_time
 
-                if query_time > 2.0:  # Медленный batch
+                if query_time > 2.0:
                     logger.warning(
                         f"[WARN] Медленный executemany: {query_time:.2f}s, {len(args_list)} операций"
                     )
@@ -366,7 +359,6 @@ class PostgresClient:
             async with postgres_client.transaction() as tx:
                 await tx.execute("INSERT INTO users ...")
                 await tx.execute("UPDATE stats ...")
-                # Автоматический COMMIT или ROLLBACK при ошибке
         """
         async with self.acquire() as conn:
             async with conn.transaction():
@@ -466,17 +458,13 @@ class PostgresClient:
                 )
                 return health_info
 
-            # Тест соединения
             start_time = time.time()
 
             async with self.acquire() as conn:
-                # Базовый тест
                 await conn.fetchval("SELECT 1")
 
-                # Проверяем версию
                 version = await conn.fetchval("SELECT version()")
 
-                # Проверяем права доступа
                 can_create_table = True
                 try:
                     await conn.fetchval(
@@ -485,14 +473,12 @@ class PostgresClient:
                 except:
                     can_create_table = False
 
-                # Проверяем активные соединения
                 active_connections = await conn.fetchval(
                     "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
                 )
 
             response_time_ms = (time.time() - start_time) * 1000
 
-            # Статистика пула
             pool_stats = self.get_pool_stats()
 
             health_info.update(
@@ -514,7 +500,6 @@ class PostgresClient:
                 }
             )
 
-            # Предупреждения
             warnings = []
             if pool_stats.utilization_ratio > 0.8:
                 warnings.append("High pool utilization (>80%)")
@@ -548,11 +533,9 @@ class PostgresClient:
         try:
             initial_size = self.pool.get_size()
 
-            # В asyncpg нет прямого способа cleanup, но можем пересоздать пул
-            # Для production используйте connection_max_lifetime в настройках пула
 
             logger.info(f"[CLEAN] PostgreSQL cleanup: пул размер {initial_size}")
-            return 0  # Placeholder
+            return 0
 
         except Exception as e:
             logger.error(f"[WARN] Cleanup error: {e}")

@@ -38,7 +38,6 @@ class SpamDetectionConfig:
     """
 
     ensemble: Dict[str, Any]
-    # Дополнительные настройки (опционально)
     ruspam: Optional[Dict[str, Any]] = None
 
 
@@ -56,11 +55,10 @@ class RUSpamConfig:
 class BotHubConfig:
     """Конфигурация BotHub API"""
     
-    # BotHub не требует глобального API ключа - используется токен пользователя
-    model: str = "gpt-4o-mini"
-    max_tokens: int = 150
+    model: str = "gpt-5-nano"
+    max_tokens: int = 300
     temperature: float = 0.0
-    timeout: float = 10.0
+    timeout: float = 60.0
     max_retries: int = 2
     retry_delay: float = 1.0
 
@@ -88,14 +86,12 @@ class Config:
     logging: Dict[str, Any]
     http_server: Dict[str, Any]
 
-    # Новые секции
     ruspam: Optional[RUSpamConfig] = None
     api: Optional[APIConfig] = None
     metrics: Optional[Dict[str, Any]] = None
     performance: Optional[Dict[str, Any]] = None
     security: Optional[Dict[str, Any]] = None
 
-    # Удобные свойства совместимости
     @property
     def bot_token(self) -> str:
         return self.telegram.token
@@ -123,31 +119,24 @@ class Config:
 
 def load_config(env: Optional[str] = None) -> Config:
     """Загрузить конфигурацию для указанного окружения"""
-    # Определяем окружение из переменной среды или по умолчанию
     if env is None:
         env = os.getenv("ENVIRONMENT", "development")
 
-    # Определяем путь к конфигурационному файлу
     config_dir = Path(__file__).parent.parent.parent / "config"
     config_file = config_dir / f"{env}.yaml"
 
     if not config_file.exists():
-        print(f"⚠️ Config file {config_file} not found, using defaults")
         return _create_default_config()
 
-    # Загружаем YAML
     with open(config_file, "r", encoding="utf-8") as f:
         config_data = yaml.safe_load(f)
 
-    # Заменяем переменные окружения
     config_data = _substitute_env_variables(config_data)
 
-    # Создаем объекты конфигурации
     database_config = DatabaseConfig(**config_data["database"])
     redis_config = RedisConfig(**config_data["redis"])
 
     telegram_data = config_data["telegram"]
-    # Обрабатываем admin_users - может быть строкой из env или списком
     admin_users = telegram_data["admin_users"]
     if isinstance(admin_users, str):
         if admin_users.startswith("${") and admin_users.endswith("}"):
@@ -161,7 +150,6 @@ def load_config(env: Optional[str] = None) -> Config:
                 else:
                     admin_users = [int(admin_users.strip())] if admin_users.strip() else []
             except ValueError as e:
-                print(f"❌ Ошибка парсинга ADMIN_USERS: {admin_users} ({e})")
                 admin_users = []
 
     admin_chat_id = telegram_data["admin_chat_id"]
@@ -182,29 +170,25 @@ def load_config(env: Optional[str] = None) -> Config:
         ngrok_url=telegram_data.get("ngrok_url"),
     )
 
-    # Современная конфигурация спам-детекции (БЕЗ heuristic и ml)
     spam_detection_config = SpamDetectionConfig(
         ensemble=config_data["spam_detection"]["ensemble"],
         ruspam=config_data["spam_detection"].get("ruspam"),
     )
 
-    # BotHub конфигурация
     bothub_data = config_data.get("bothub", {})
     bothub_config = BotHubConfig(
-        model=bothub_data.get("model", "gpt-4o-mini"),
+        model=bothub_data.get("model", "gpt-5-nano"),
         max_tokens=bothub_data.get("max_tokens", 150),
         temperature=bothub_data.get("temperature", 0.0),
-        timeout=bothub_data.get("timeout", 10.0),
+        timeout=bothub_data.get("timeout", 60.0),
         max_retries=bothub_data.get("max_retries", 2),
         retry_delay=bothub_data.get("retry_delay", 1.0),
     )
 
-    # RUSpam конфигурация (если есть)
     ruspam_config = None
     if "ruspam" in config_data:
         ruspam_config = RUSpamConfig(**config_data["ruspam"])
 
-    # API конфигурация (если есть)
     api_config = None
     if "api" in config_data:
         api_config = APIConfig(**config_data["api"])
@@ -251,7 +235,6 @@ def _parse_admin_users(admin_users_str: str) -> List[int]:
         else:
             return [int(admin_users_str.strip())] if admin_users_str.strip() else []
     except ValueError:
-        print(f"⚠️ Неверный формат ADMIN_USERS: {admin_users_str}")
         return []
 
 
@@ -267,7 +250,6 @@ def _create_default_config() -> Config:
             webhook_url=os.getenv("WEBHOOK_URL"),
             ngrok_url=os.getenv("NGROK_URL"),
         ),
-        # СОВРЕМЕННАЯ конфигурация детекции (БЕЗ heuristic и ml!)
         spam_detection=SpamDetectionConfig(
             ensemble={
                 "spam_threshold": 0.6,
@@ -280,10 +262,10 @@ def _create_default_config() -> Config:
             }
         ),
         bothub=BotHubConfig(
-            model="gpt-4o-mini",
+            model="gpt-5-nano",
             max_tokens=150,
             temperature=0.0,
-            timeout=10.0,
+            timeout=60.0,
             max_retries=2,
             retry_delay=1.0,
         ),

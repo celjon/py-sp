@@ -1,4 +1,5 @@
 from typing import Optional, List
+from datetime import datetime
 import aiogram
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -17,11 +18,16 @@ class TelegramGateway:
             )
             return True
         except (TelegramBadRequest, TelegramForbiddenError) as e:
-            print(f"Failed to ban user {user_id} in chat {chat_id}: {e}")
             return False
 
-    async def restrict_user(self, chat_id: int, user_id: int) -> bool:
-        """Ограничить пользователя (mute)"""
+    async def restrict_user(self, chat_id: int, user_id: int, until_date: Optional[datetime] = None) -> bool:
+        """Ограничить пользователя (mute)
+
+        Args:
+            chat_id: ID чата
+            user_id: ID пользователя
+            until_date: Дата окончания ограничения (None = постоянно)
+        """
         try:
             await self.bot.restrict_chat_member(
                 chat_id=chat_id,
@@ -35,10 +41,10 @@ class TelegramGateway:
                     can_send_video_notes=False,
                     can_send_voice_notes=False,
                 ),
+                until_date=until_date
             )
             return True
         except (TelegramBadRequest, TelegramForbiddenError) as e:
-            print(f"Failed to restrict user {user_id} in chat {chat_id}: {e}")
             return False
 
     async def delete_message(self, chat_id: int, message_id: int) -> bool:
@@ -47,7 +53,6 @@ class TelegramGateway:
             await self.bot.delete_message(chat_id=chat_id, message_id=message_id)
             return True
         except (TelegramBadRequest, TelegramForbiddenError) as e:
-            print(f"Failed to delete message {message_id} in chat {chat_id}: {e}")
             return False
 
     async def unban_user(self, chat_id: int, user_id: int, only_if_banned: bool = True) -> bool:
@@ -58,7 +63,6 @@ class TelegramGateway:
             )
             return True
         except (TelegramBadRequest, TelegramForbiddenError) as e:
-            print(f"Failed to unban user {user_id} in chat {chat_id}: {e}")
             return False
 
     async def get_chat_member(self, chat_id: int, user_id: int) -> Optional[ChatMember]:
@@ -66,7 +70,6 @@ class TelegramGateway:
         try:
             return await self.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         except (TelegramBadRequest, TelegramForbiddenError) as e:
-            print(f"Failed to get chat member {user_id} in chat {chat_id}: {e}")
             return None
 
     async def get_chat_administrators(self, chat_id: int) -> List[ChatMember]:
@@ -74,7 +77,6 @@ class TelegramGateway:
         try:
             return await self.bot.get_chat_administrators(chat_id=chat_id)
         except (TelegramBadRequest, TelegramForbiddenError) as e:
-            print(f"Failed to get chat administrators for chat {chat_id}: {e}")
             return []
 
     async def send_message(self, chat_id: int, text: str, reply_to: Optional[int] = None) -> bool:
@@ -83,5 +85,4 @@ class TelegramGateway:
             await self.bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=reply_to)
             return True
         except (TelegramBadRequest, TelegramForbiddenError) as e:
-            print(f"Failed to send message to chat {chat_id}: {e}")
             return False

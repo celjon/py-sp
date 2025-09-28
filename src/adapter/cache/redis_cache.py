@@ -25,10 +25,8 @@ class RedisCache:
             if not self.redis:
                 await self.connect()
 
-            # Проверяем соединение
             await self.redis.ping()
 
-            # Получаем информацию о Redis
             info = await self.redis.info()
 
             return {
@@ -59,13 +57,11 @@ class RedisCache:
             if value is None:
                 return None
 
-            # Пытаемся декодировать JSON, если не получается - возвращаем как строку
             try:
                 return json.loads(value)
             except (json.JSONDecodeError, TypeError):
                 return value
         except Exception as e:
-            print(f"Error getting key {key} from Redis: {e}")
             return None
 
     async def set(self, key: str, value: Any, ttl: int = None) -> bool:
@@ -84,7 +80,6 @@ class RedisCache:
             await self.connect()
 
         try:
-            # Сериализуем значение в JSON если это не строка
             if isinstance(value, str):
                 serialized_value = value
             else:
@@ -97,7 +92,6 @@ class RedisCache:
 
             return True
         except Exception as e:
-            print(f"Error setting key {key} in Redis: {e}")
             return False
 
     async def delete(self, key: str) -> bool:
@@ -117,7 +111,6 @@ class RedisCache:
             result = await self.redis.delete(key)
             return result > 0
         except Exception as e:
-            print(f"Error deleting key {key} from Redis: {e}")
             return False
 
     async def exists(self, key: str) -> bool:
@@ -137,7 +130,6 @@ class RedisCache:
             result = await self.redis.exists(key)
             return result > 0
         except Exception as e:
-            print(f"Error checking existence of key {key} in Redis: {e}")
             return False
 
     async def increment(self, key: str, amount: int = 1, ttl: int = None) -> Optional[int]:
@@ -156,15 +148,12 @@ class RedisCache:
             await self.connect()
 
         try:
-            # Проверяем, существует ли ключ
             if not await self.exists(key) and ttl:
-                # Если ключ не существует и задан TTL, устанавливаем его
                 await self.redis.setex(key, ttl, "0")
 
             result = await self.redis.incrby(key, amount)
             return result
         except Exception as e:
-            print(f"Error incrementing key {key} in Redis: {e}")
             return None
 
     async def get_keys_by_pattern(self, pattern: str) -> list:
@@ -184,7 +173,6 @@ class RedisCache:
             keys = await self.redis.keys(pattern)
             return keys
         except Exception as e:
-            print(f"Error getting keys by pattern {pattern} from Redis: {e}")
             return []
 
     async def clear_pattern(self, pattern: str) -> int:
@@ -207,5 +195,4 @@ class RedisCache:
                 return deleted_count
             return 0
         except Exception as e:
-            print(f"Error clearing pattern {pattern} from Redis: {e}")
             return 0

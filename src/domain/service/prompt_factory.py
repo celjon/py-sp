@@ -6,13 +6,16 @@ class PromptFactory:
     @staticmethod
     def build_spam_detection_prompt(user_instructions: str) -> str:
         response_format = """
-ФОРМАТ ОТВЕТА (только JSON):
-{
-  "is_spam": boolean,
-  "confidence": float (0.0-1.0)
-}"""
+КРИТИЧЕСКИ ВАЖНО:
+- Ответь ТОЛЬКО валидным JSON объектом
+- НЕ пиши объяснений, комментариев или рассуждений
+- НЕ добавляй никакого текста до или после JSON
+- Формат ответа: {"is_spam": boolean, "confidence": 0.0-1.0}
 
-        return f"{user_instructions}\n{response_format}"
+ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
+{"is_spam": false, "confidence": 0.95}"""
+
+        return f"{user_instructions}\n\n{response_format}"
 
     @staticmethod
     def get_default_user_instructions() -> str:

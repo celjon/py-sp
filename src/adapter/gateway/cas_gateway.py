@@ -11,7 +11,7 @@ class CASGateway:
         self.cache = cache
         self.api_url = config.get("api_url")
         self.timeout = config.get("timeout", 5)
-        self.cache_ttl = config.get("cache_ttl", 3600)  # 1 час
+        self.cache_ttl = config.get("cache_ttl", 3600)
 
     async def check_cas(self, user_id: int) -> bool:
         """
@@ -24,41 +24,31 @@ class CASGateway:
             bool: True если пользователь забанен в CAS, False если нет
         """
         cache_key = f"cas_check:{user_id}"
-        # Проверяем кэш
         cached_result = await self.cache.get(cache_key)
         if cached_result is not None:
             return cached_result == "banned"
 
         try:
-            # Делаем запрос к CAS API согласно документации
             url = f"{self.api_url}?user_id={user_id}"
 
             response_data = await self.http_client.get(
                 url, headers={"User-Agent": "AntiSpamBot/1.0"}
             )
 
-            # Согласно реальному поведению CAS API:
-            # - ok: True означает пользователь ЗАБАНЕН (найден в базе CAS)
-            # - ok: False означает пользователь НЕ ЗАБАНЕН (не найден в базе, "Record not found")
             if response_data:
                 is_banned = response_data.get("ok", False)
 
-                # Кэшируем результат
                 await self.cache.set(
                     cache_key, "banned" if is_banned else "clean", ttl=self.cache_ttl
                 )
 
                 return is_banned
             else:
-                # Нет ответа от API
-                print(f"CAS API no response for user {user_id}")
                 return False
 
         except asyncio.TimeoutError:
-            print(f"CAS API timeout for user {user_id}")
             return False
         except Exception as e:
-            print(f"CAS API error for user {user_id}: {e}")
             return False
 
     async def get_banned_users_csv(self) -> Optional[str]:
@@ -78,11 +68,10 @@ class CASGateway:
             if response_data:
                 return response_data
             else:
-                print("CAS API: Failed to get CSV export")
+                pass
                 return None
 
         except Exception as e:
-            print(f"CAS CSV export error: {e}")
             return None
 
     async def health_check(self) -> dict:
@@ -93,11 +82,9 @@ class CASGateway:
             dict: Статус здоровья системы
         """
         try:
-            # Проверяем доступность API с тестовым запросом
-            test_user_id = 304392973  # Тестовый ID
+            test_user_id = 304392973
             start_time = asyncio.get_event_loop().time()
 
-            # Делаем тестовый запрос
             is_banned = await self.check_cas(test_user_id)
 
             response_time = (asyncio.get_event_loop().time() - start_time) * 1000

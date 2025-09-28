@@ -45,13 +45,10 @@ class HttpClient:
                 if response.status == 200:
                     return await response.json()
                 else:
-                    print(f"HTTP GET error {response.status}: {url}")
                     return None
         except asyncio.TimeoutError:
-            print(f"Timeout error for GET {url}")
             return None
         except Exception as e:
-            print(f"Error during GET {url}: {e}")
             return None
 
     async def post(
@@ -80,13 +77,10 @@ class HttpClient:
                 if response.status in [200, 201]:
                     return await response.json()
                 else:
-                    print(f"HTTP POST error {response.status}: {url}")
                     return None
         except asyncio.TimeoutError:
-            print(f"Timeout error for POST {url}")
             return None
         except Exception as e:
-            print(f"Error during POST {url}: {e}")
             return None
 
     async def get_text(self, url: str, headers: Optional[Dict[str, str]] = None) -> Optional[str]:
@@ -107,13 +101,10 @@ class HttpClient:
                 if response.status == 200:
                     return await response.text()
                 else:
-                    print(f"HTTP GET error {response.status}: {url}")
                     return None
         except asyncio.TimeoutError:
-            print(f"Timeout error for GET {url}")
             return None
         except Exception as e:
-            print(f"Error during GET {url}: {e}")
             return None
 
     async def get_status(self, url: str, headers: Optional[Dict[str, str]] = None) -> int:
@@ -133,11 +124,9 @@ class HttpClient:
             async with self.session.get(url, headers=headers) as response:
                 return response.status
         except asyncio.TimeoutError:
-            print(f"Timeout error for GET {url}")
-            return 408  # Request Timeout
+            return 408
         except Exception as e:
-            print(f"Error during GET {url}: {e}")
-            return 500  # Internal Server Error
+            return 500
 
     async def close(self):
         """Закрывает HTTP сессию"""

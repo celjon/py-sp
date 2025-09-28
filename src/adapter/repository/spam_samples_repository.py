@@ -34,7 +34,6 @@ class SpamSamplesRepository:
                 sample.tags,
             )
 
-            # Обновляем ID и временные метки
             sample.id = row["id"]
             sample.created_at = row["created_at"]
             sample.updated_at = row["updated_at"]

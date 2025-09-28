@@ -1,11 +1,14 @@
 from typing import Protocol, List
 import time
+import logging
 from ...entity.message import Message
 from ...entity.user import User
 from ...entity.detection_result import DetectionResult
 from ...service.detector.ensemble import EnsembleDetector
 from ....adapter.gateway.bothub_gateway import BotHubGateway
 from ...service.detector.bothub import BotHubDetector
+
+logger = logging.getLogger(__name__)
 
 
 class MessageRepository(Protocol):
@@ -40,10 +43,8 @@ class CheckMessageUseCase:
     async def execute(self, message: Message, chat=None) -> DetectionResult:
         start_time = time.time()
 
-        # Пользователь и контекст
         user = await self.user_repo.get_user(message.user_id)
         if not user:
-            # Создаем нового пользователя в БД при первом сообщении
             user = await self.user_repo.create_user(
                 telegram_id=message.user_id,
                 username=message.username,
@@ -51,7 +52,8 @@ class CheckMessageUseCase:
                 last_name=message.last_name
             )
 
-        if await self.user_repo.is_user_approved(message.user_id):
+        if await self.user_repo.is_user_approved(message.user_id, message.chat_id):
+            logger.info(f"⭐ User {message.user_id} is in whitelist (approved_users) - skipping spam detection")
             result = DetectionResult(
                 message_id=message.id or 0,
                 user_id=message.user_id,
@@ -63,7 +65,10 @@ class CheckMessageUseCase:
             await self._persist(message, user, result)
             return result
 
-        # Приоритет: system_prompt группы > system_prompt пользователя
+        effective_spam_threshold = self.spam_threshold
+        if chat and hasattr(chat, 'spam_threshold'):
+            effective_spam_threshold = chat.spam_threshold
+
         system_prompt = None
         if chat and chat.system_prompt:
             system_prompt = chat.system_prompt
@@ -80,16 +85,24 @@ class CheckMessageUseCase:
             "user_bothub_token": user.bothub_token if user.bothub_configured else None,
             "user_system_prompt": system_prompt,
             "user_bothub_model": user.bothub_model if user.bothub_configured else None,
+            "spam_threshold": effective_spam_threshold,
+            "user_repository": self.user_repo,
         }
 
-        # Ансамблевая детекция
         result = await self.spam_detector.detect(message, user_context)
 
-        # Сохранение и обновление статистики
+        original_is_spam = result.is_spam
+        result.is_spam = result.overall_confidence >= effective_spam_threshold
+
+        result.should_delete = result.is_spam
+        result.should_warn = result.is_spam
+
+        if original_is_spam != result.is_spam:
+            pass
+
         await self._persist(message, user, result)
 
         total_time_ms = (time.time() - start_time) * 1000
-        print(f"Message check completed in {total_time_ms:.2f}ms")
         return result
 
     async def _persist(self, message: Message, user: User, result: DetectionResult) -> None:
@@ -101,15 +114,10 @@ class CheckMessageUseCase:
         new_spam_score = self._ema(user.spam_score, result.overall_confidence, 0.1)
         await self.user_repo.update_user_stats(message.user_id, new_message_count, new_spam_score)
         
-        # Если сообщение определено как спам, увеличиваем счетчик
         if result.is_spam:
             daily_spam_count = await self.user_repo.increment_spam_count(message.user_id)
-            print(f"🚨 Spam detected! User {message.user_id} spam count: {daily_spam_count}")
-            
-            # Проверяем, нужно ли банить пользователя
+
             if daily_spam_count >= self.max_daily_spam:
-                print(f"🔨 User {message.user_id} should be banned for {daily_spam_count} spam messages today")
-                # Устанавливаем флаги для бана
                 result.should_ban = True
                 result.should_delete = True
 

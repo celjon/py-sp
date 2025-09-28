@@ -1,4 +1,3 @@
-# src/adapter/gateway/bothub_gateway.py
 """
 BotHub Gateway - OpenAI-совместимый клиент для BotHub API
 """
@@ -38,7 +37,7 @@ class BotHubGateway:
                         'Authorization': f'Bearer {token}',
                         'Content-Type': 'application/json'
                     },
-                    timeout=10.0
+                    timeout=60.0
                 )
                 if response.status_code == 200:
                     models = response.json()
@@ -72,13 +71,13 @@ class BotHubGateway:
                         'Content-Type': 'application/json'
                     },
                     json={
-                        'model': 'gpt-4o-mini',
+                        'model': 'gpt-5-nano',
                         'messages': [{'role': 'user', 'content': 'test'}],
                         'max_tokens': 5
                     },
-                    timeout=10.0
+                    timeout=60.0
                 )
-                return response.status_code in [200, 429]  # 429 = rate limit, но токен валиден
+                return response.status_code in [200, 429]
         except Exception as e:
             logger.error(f"Error verifying token: {e}")
             return False
@@ -98,25 +97,21 @@ class BotHubGateway:
         self.system_prompt = PromptFactory.build_spam_detection_prompt(self.user_instructions)
         self.config = config or {}
 
-        # Настройки из конфига
-        self.model = user_model or self.config.get("model", "gpt-4o-mini")
-        self.max_tokens = self.config.get("max_tokens", 150)
+        self.model = user_model or self.config.get("model", "gpt-5-nano")
+        self.max_tokens = self.config.get("max_tokens", 1000)
         self.temperature = self.config.get("temperature", 0.0)
-        self.timeout = self.config.get("timeout", 10.0)
+        self.timeout = self.config.get("timeout", 60.0)
         self.max_retries = self.config.get("max_retries", 2)
         self.retry_delay = self.config.get("retry_delay", 1.0)
         
-        # BotHub API настройки
         self.base_url = "https://bothub.chat/api/v2/openai/v1"
         
-        # Инициализация OpenAI клиента
         self.client = AsyncOpenAI(
             api_key=self.user_token,
             base_url=self.base_url,
             timeout=self.timeout
         )
         
-        # Статистика
         self._total_requests = 0
         self._total_processing_time = 0.0
         self._last_health_check = 0
@@ -132,16 +127,17 @@ class BotHubGateway:
     ) -> Tuple[bool, float, Dict[str, int]]:
         """
         Проверить сообщение через BotHub API
-        
+
         Args:
             text: Текст для анализа
             user_context: Контекст пользователя
-            
+
         Returns:
             (is_spam, confidence, token_usage)
         """
+        start_time = time.time()
+
         try:
-            # Формируем контекстную информацию
             context_info = ""
             if user_context:
                 context_info = f"""
@@ -151,40 +147,94 @@ User context:
 - Is new user: {user_context.get('is_new_user', False)}
 """
 
-            # Формируем запрос
             messages = [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": f"{context_info}\n\nMessage to analyze: {text}"},
             ]
 
-            # Выполняем запрос к BotHub
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                response_format={"type": "json_object"}
-            )
+            # Параметры запроса
+            request_params = {
+                "model": self.model,
+                "messages": messages,
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature
+            }
 
-            # Парсим ответ
+            # Для GPT моделей полностью отключаем reasoning - ответ будет только в content
+            if self.model.lower().startswith('gpt') or 'gpt' in self.model.lower():
+                request_params["reasoning"] = {"max_tokens": 0}  # Полное отключение reasoning
+                logger.debug(f"[BOTHUB] Полностью отключаем reasoning для GPT модели: {self.model}")
+
+            # Принудительно требуем JSON ответ без дополнительного текста
+            if "max_tokens" in request_params:
+                request_params["max_tokens"] = min(request_params["max_tokens"], 200)  # Ограничиваем для краткости
+
+            response = await self.client.chat.completions.create(**request_params)
+
             content = response.choices[0].message.content
-            result = json.loads(content)
-            
-            # Извлекаем данные
+            logger.info(f"[BOTHUB] Raw API response: {repr(content)}")
+
+            # Проверяем на пустой content
+            if not content or content.strip() == "":
+                logger.error(f"[BOTHUB] Empty response despite completion_tokens={response.usage.completion_tokens if response.usage else 0}")
+                logger.error(f"[BOTHUB] Full response: {response}")
+                # Возвращаем "не спам" с низкой уверенностью при пустом ответе
+                return False, 0.0, {
+                    "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                    "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                    "total_tokens": response.usage.total_tokens if response.usage else 0
+                }
+
+            try:
+                # Очищаем content от возможного мусора (пробелы, переносы строк)
+                clean_content = content.strip()
+
+                # Если есть дополнительный текст до/после JSON, пытаемся извлечь только JSON
+                import re
+                json_match = re.search(r'\{[^}]*"is_spam"[^}]*"confidence"[^}]*\}', clean_content)
+                if json_match:
+                    clean_content = json_match.group(0)
+                    logger.debug(f"[BOTHUB] Извлечен чистый JSON: {clean_content}")
+
+                result = json.loads(clean_content)
+                logger.info(f"[BOTHUB] Parsed JSON: {result}")
+
+                # Проверяем что JSON содержит обязательные поля
+                if "is_spam" not in result or "confidence" not in result:
+                    raise ValueError(f"Missing required fields in response: {result}")
+
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(f"[BOTHUB] JSON decode/validation error: {e}")
+                logger.error(f"[BOTHUB] Full response content (len={len(content)}): {content}")
+                logger.error(f"[BOTHUB] Usage: {response.usage}")
+                # Fallback - возвращаем безопасные значения
+                return False, 0.0, {
+                    "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                    "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                    "total_tokens": response.usage.total_tokens if response.usage else 0
+                }
+
             is_spam = result.get("is_spam", False)
-            confidence = float(result.get("confidence", 0.0))
-            
-            # Токены
+            raw_confidence = float(result.get("confidence", 0.0))
+
+            # Конвертируем BotHub confidence в RUSpam-совместимый формат:
+            # BotHub: is_spam=true, confidence=0.95 → RUSpam: 0.95 (спам)
+            # BotHub: is_spam=false, confidence=0.95 → RUSpam: 0.05 (не спам)
+            confidence = raw_confidence if is_spam else (1.0 - raw_confidence)
+
             token_usage = {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens
+                "total_tokens": response.usage.total_tokens,
+                "raw_confidence": raw_confidence  # Сохраняем исходную уверенность для логирования
             }
-            
+
+            processing_time = time.time() - start_time
             self._total_requests += 1
-            
-            logger.debug(f"🔗 BotHub анализ: is_spam={is_spam}, confidence={confidence:.3f}")
-            
+            self._total_processing_time += processing_time
+
+            logger.debug(f"🔗 BotHub анализ: is_spam={is_spam}, raw_confidence={raw_confidence:.3f}, normalized_confidence={confidence:.3f}, время={processing_time*1000:.1f}ms")
+
             return is_spam, confidence, token_usage
             
         except json.JSONDecodeError as e:
@@ -197,49 +247,65 @@ User context:
 
     async def health_check(self) -> Dict[str, Any]:
         """
-        Проверка здоровья BotHub API
-        
+        Проверка здоровья BotHub API через проверку доступности модели
+
         Returns:
             Статус API
         """
         current_time = time.time()
-        
-        # Кэшируем результат на 30 секунд
+
         if current_time - self._last_health_check < 30:
             return self._last_health_status
-            
+
         try:
-            # Простой тестовый запрос
-            test_messages = [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Hello"}
-            ]
-            
             start_time = time.time()
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=test_messages,
-                max_tokens=10,
-                temperature=0.0
-            )
-            
-            response_time = (time.time() - start_time) * 1000
-            
-            self._last_health_status = {
-                "status": "healthy",
-                "response_time_ms": response_time,
-                "model": self.model,
-                "last_check": current_time,
-                "total_requests": self._total_requests,
-                "avg_processing_time": self._total_processing_time / max(self._total_requests, 1)
-            }
-            
+
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    'https://bothub.chat/api/v2/model/list?children=1',
+                    headers={
+                        'Authorization': f'Bearer {self.user_token}',
+                        'Content-Type': 'application/json'
+                    },
+                    timeout=60.0
+                )
+
+                response_time = (time.time() - start_time) * 1000
+
+                if response.status_code == 200:
+                    models = response.json()
+                    model_found = any(
+                        model.get('id') == self.model or model.get('label') == self.model
+                        for model in models
+                    )
+
+                    status = "healthy" if model_found else "warning"
+
+                    self._last_health_status = {
+                        "status": status,
+                        "response_time_ms": response_time,
+                        "model": self.model,
+                        "model_available": model_found,
+                        "last_check": current_time,
+                        "total_requests": self._total_requests,
+                        "avg_processing_time": self._total_processing_time / max(self._total_requests, 1)
+                    }
+                else:
+                    self._last_health_status = {
+                        "status": "error",
+                        "error": f"HTTP {response.status_code}",
+                        "model": self.model,
+                        "last_check": current_time
+                    }
+
             self._last_health_check = current_time
-            
+
         except Exception as e:
+            logger.warning(f"BotHub health check failed: {e}")
             self._last_health_status = {
                 "status": "error",
                 "error": str(e),
+                "model": self.model,
                 "last_check": current_time
             }
             self._last_health_check = current_time

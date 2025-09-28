@@ -165,6 +165,14 @@ async def shutdown_application():
         if app_state["production_services"]:
             services = app_state["production_services"]
 
+            # Останавливаем cleanup scheduler
+            if services.background_cleanup:
+                try:
+                    await services.background_cleanup.stop_cleanup_scheduler()
+                    logger.info("[OK] Cleanup scheduler stopped")
+                except Exception as e:
+                    logger.warning(f"[WARN] Error stopping cleanup scheduler: {e}")
+
             # Останавливаем метрики сервер
             if app_state["metrics"]:
                 try:
@@ -236,9 +244,9 @@ def setup_logging(config: Dict[str, Any]):
                 logger_factory=structlog.stdlib.LoggerFactory(),
                 cache_logger_on_first_use=True,
             )
-            print("✅ Structured logging configured")
+            pass
         except ImportError:
-            print("⚠️ structlog not available, using standard logging")
+            pass
 
 
 async def start_telegram_bot(config: Dict[str, Any], services: ProductionServices):
@@ -286,6 +294,11 @@ async def start_telegram_bot(config: Dict[str, Any], services: ProductionService
 
         # Создаем бота
         bot = AntiSpamBot(bot_token=bot_token, redis_url=redis_url, dependencies=bot_dependencies)
+
+        # Запускаем автоматическую очистку сообщений
+        if services.background_cleanup:
+            await services.background_cleanup.start_cleanup_scheduler(interval_hours=6)
+            logger.info("[OK] Automatic cleanup scheduler started (every 6 hours)")
 
         # Запускаем бота
         await bot.start_polling()
@@ -407,7 +420,6 @@ def setup_basic_routes(app: FastAPI):
             logger.error(f"Metrics endpoint failed: {e}")
             return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
-    print("[ROUTES] Basic routes configured")
 
 
 def setup_routes(app: FastAPI):
@@ -415,7 +427,6 @@ def setup_routes(app: FastAPI):
     # API routes
     # API роуты удалены - используем только Telegram бот
 
-    print("[ROUTES] Full API routes configured")
 
 
 def config_to_dict(config) -> Dict[str, Any]:

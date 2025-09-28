@@ -1,4 +1,3 @@
-# antispam_client/client.py
 """
 AntiSpam API Python SDK v2.0
 Production-ready клиент для интеграции с AntiSpam Detection API
@@ -198,7 +197,6 @@ class AntiSpamClient:
         self.retry_delay = retry_delay
         self.enable_logging = enable_logging
         
-        # HTTP заголовки
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -206,7 +204,6 @@ class AntiSpamClient:
             "Accept": "application/json"
         }
         
-        # Сессия для connection pooling
         self._session = None
         self._async_session = None
         
@@ -242,7 +239,6 @@ class AntiSpamClient:
             await self._async_session.close()
             self._async_session = None
     
-    # === SYNC METHODS ===
     
     def detect(
         self,
@@ -298,7 +294,6 @@ class AntiSpamClient:
         if len(messages) > 100:
             raise ValidationError("Maximum 100 messages per batch")
         
-        # Нормализуем сообщения
         normalized_messages = []
         for msg in messages:
             if isinstance(msg, str):
@@ -338,7 +333,6 @@ class AntiSpamClient:
         """Health check API"""
         return self._make_request("GET", "/api/v1/health")
     
-    # === ASYNC METHODS ===
     
     async def detect_async(
         self,
@@ -369,7 +363,6 @@ class AntiSpamClient:
         if len(messages) > 100:
             raise ValidationError("Maximum 100 messages per batch")
         
-        # Нормализуем сообщения  
         normalized_messages = []
         for msg in messages:
             if isinstance(msg, str):
@@ -401,7 +394,6 @@ class AntiSpamClient:
         """Асинхронный health check"""
         return await self._make_request_async("GET", "/api/v1/health")
     
-    # === HELPER METHODS ===
     
     def _validate_text(self, text: str) -> None:
         """Валидация текста"""
@@ -438,7 +430,7 @@ class AntiSpamClient:
                 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 if attempt < self.max_retries:
-                    delay = self.retry_delay * (2 ** attempt)  # Exponential backoff
+                    delay = self.retry_delay * (2 ** attempt)
                     if self.logger:
                         self.logger.warning(f"Request failed: {e}. Retrying in {delay}s...")
                     time.sleep(delay)
@@ -472,7 +464,7 @@ class AntiSpamClient:
                         
             except (aiohttp.ClientTimeout, aiohttp.ClientError) as e:
                 if attempt < self.max_retries:
-                    delay = self.retry_delay * (2 ** attempt)  # Exponential backoff
+                    delay = self.retry_delay * (2 ** attempt)
                     if self.logger:
                         self.logger.warning(f"Async request failed: {e}. Retrying in {delay}s...")
                     await asyncio.sleep(delay)
@@ -535,7 +527,6 @@ class AntiSpamClient:
                 raise ApiError(f"HTTP {response.status}: {text}", response.status)
 
 
-# === CONVENIENCE FUNCTIONS ===
 
 def detect_spam(
     text: str,
@@ -570,22 +561,18 @@ async def detect_spam_async(
         return await client.detect_async(text, context)
 
 
-# === EXAMPLE USAGE ===
 
 if __name__ == "__main__":
     import asyncio
     
     API_KEY = "antispam_your_api_key_here"
     
-    # Синхронное использование
     print("=== Синхронный пример ===")
     with AntiSpamClient(API_KEY, enable_logging=True) as client:
-        # Простая проверка
         result = client.detect("Хочешь заработать быстрые деньги? Пиши в ЛС!")
         print(f"Spam: {result.is_spam}, Confidence: {result.confidence:.2f}")
         print(f"Action: {result.recommended_action}")
         
-        # Batch проверка
         messages = [
             "Привет, как дела?",
             "СРОЧНО! ЗАРАБОТАЙ МИЛЛИОН!",
@@ -594,11 +581,9 @@ if __name__ == "__main__":
         batch_result = client.detect_batch(messages)
         print(f"Batch: {batch_result.summary}")
         
-        # Статистика
         stats = client.get_usage_stats(hours=24)
         print(f"Requests today: {stats.usage_stats.get('total_requests', 0)}")
     
-    # Асинхронное использование
     async def async_example():
         print("\n=== Асинхронный пример ===")
         async with AntiSpamClient(API_KEY) as client:

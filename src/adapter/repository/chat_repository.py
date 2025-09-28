@@ -1,4 +1,3 @@
-# src/adapter/repository/chat_repository.py
 """
 Repository для управления чатами с поддержкой владения
 """
@@ -26,8 +25,8 @@ class ChatRepository:
         """Создает новый чат"""
         query = """
         INSERT INTO chats (chat_id, owner_user_id, title, chat_type, description, username,
-                          is_monitored, spam_threshold, is_active, system_prompt, settings, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                          is_monitored, spam_threshold, is_active, system_prompt, ban_notifications_enabled, settings, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING id, created_at, updated_at
         """
 
@@ -46,6 +45,7 @@ class ChatRepository:
                 chat.spam_threshold,
                 chat.is_active,
                 chat.system_prompt,
+                chat.ban_notifications_enabled,
                 json.dumps(chat.settings or {}),
                 now,
                 now,
@@ -75,7 +75,7 @@ class ChatRepository:
         query = """
         SELECT * FROM chats WHERE chat_id = $1 AND owner_user_id = $2
         """
-        
+
         async with self.db.acquire() as conn:
             row = await conn.fetchrow(query, chat_id, owner_user_id)
             if row:
@@ -102,8 +102,9 @@ class ChatRepository:
         query = """
         UPDATE chats
         SET title = $1, description = $2, username = $3, is_monitored = $4,
-            spam_threshold = $5, is_active = $6, system_prompt = $7, settings = $8, updated_at = $9
-        WHERE id = $10
+            spam_threshold = $5, is_active = $6, system_prompt = $7, ban_notifications_enabled = $8, settings = $9, updated_at = $10,
+            chat_id = $11, chat_type = $12
+        WHERE id = $13
         RETURNING updated_at
         """
 
@@ -119,8 +120,11 @@ class ChatRepository:
                 chat.spam_threshold,
                 chat.is_active,
                 chat.system_prompt,
+                chat.ban_notifications_enabled,
                 json.dumps(chat.settings or {}),
                 now,
+                chat.telegram_id,
+                chat.type.value,
                 chat.id,
             )
 
@@ -204,6 +208,7 @@ class ChatRepository:
             spam_threshold=row["spam_threshold"],
             is_active=row["is_active"],
             system_prompt=row.get("system_prompt"),
+            ban_notifications_enabled=row.get("ban_notifications_enabled", True),
             settings=row["settings"] or {},
             created_at=row["created_at"],
             updated_at=row["updated_at"],

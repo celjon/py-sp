@@ -1,4 +1,3 @@
-# tests/performance/locustfile.py
 """
 Performance Tests with Locust
 Нагрузочное тестирование AntiSpam Bot API
@@ -15,7 +14,7 @@ from locust.exception import StopUser
 class SpamDetectionUser(HttpUser):
     """Пользователь для тестирования API детекции спама"""
     
-    wait_time = between(0.1, 2.0)  # Пауза между запросами 100ms - 2s
+    wait_time = between(0.1, 2.0)
     
     def on_start(self):
         """Инициализация пользователя"""
@@ -26,7 +25,6 @@ class SpamDetectionUser(HttpUser):
             "User-Agent": "Locust-Performance-Test/1.0"
         }
         
-        # Тестовые данные для разнообразия нагрузки
         self.russian_messages = [
             "Привет! Как дела? Что планируешь на выходные?",
             "Спасибо за помощь с проектом вчера, очень помогло",
@@ -74,7 +72,7 @@ class SpamDetectionUser(HttpUser):
             return random.choice(self.spam_messages)
         elif message_type == "english":
             return random.choice(self.english_messages)
-        else:  # normal russian
+        else:
             return random.choice(self.russian_messages)
     
     def get_user_context(self, is_new_user=False):
@@ -95,7 +93,7 @@ class SpamDetectionUser(HttpUser):
         
         payload = {
             "text": text,
-            "context": self.get_user_context(is_new_user=random.random() < 0.1)  # 10% новых пользователей
+            "context": self.get_user_context(is_new_user=random.random() < 0.1)
         }
         
         with self.client.post(
@@ -107,9 +105,7 @@ class SpamDetectionUser(HttpUser):
             if response.status_code == 200:
                 try:
                     data = response.json()
-                    # Проверяем структуру ответа
                     if "is_spam" in data and "confidence" in data and "processing_time_ms" in data:
-                        # Проверяем время обработки
                         if data["processing_time_ms"] > 2000:
                             response.failure(f"Processing time too high: {data['processing_time_ms']}ms")
                         else:
@@ -119,7 +115,6 @@ class SpamDetectionUser(HttpUser):
                 except json.JSONDecodeError:
                     response.failure("Invalid JSON response")
             elif response.status_code == 429:
-                # Rate limiting - это нормально под нагрузкой
                 response.success()
             else:
                 response.failure(f"HTTP {response.status_code}: {response.text}")
@@ -131,7 +126,7 @@ class SpamDetectionUser(HttpUser):
         
         payload = {
             "text": text,
-            "context": self.get_user_context(is_new_user=random.random() < 0.3)  # 30% новых пользователей для спама
+            "context": self.get_user_context(is_new_user=random.random() < 0.3)
         }
         
         with self.client.post(
@@ -144,13 +139,11 @@ class SpamDetectionUser(HttpUser):
                 try:
                     data = response.json()
                     if "is_spam" in data and "confidence" in data:
-                        # Для спам сообщений ожидаем высокую уверенность
                         if data["is_spam"] and data["confidence"] > 0.6:
                             response.success()
                         elif not data["is_spam"] and data["confidence"] < 0.4:
                             response.success()
                         else:
-                            # Неопределенные случаи тоже нормальны
                             response.success()
                     else:
                         response.failure("Invalid response structure")
@@ -227,7 +220,7 @@ class SpamDetectionUser(HttpUser):
 class HighVolumeUser(HttpUser):
     """Пользователь для высоконагруженного тестирования"""
     
-    wait_time = between(0.01, 0.1)  # Очень быстрые запросы
+    wait_time = between(0.01, 0.1)
     
     def on_start(self):
         """Инициализация для высокой нагрузки"""
@@ -238,7 +231,6 @@ class HighVolumeUser(HttpUser):
             "User-Agent": "Locust-HighVolume-Test/1.0"
         }
         
-        # Простые сообщения для минимизации влияния на производительность
         self.quick_messages = [
             "привет",
             "спасибо",
@@ -295,7 +287,6 @@ class StressTestUser(HttpUser):
             "User-Agent": "Locust-Stress-Test/1.0"
         }
         
-        # Сложные сообщения для максимальной нагрузки на детекторы
         self.complex_messages = [
             "Это очень длинное сообщение для тестирования производительности системы детекции спама. " * 20,
             "🔥💰🚀💎🎉🎊🎈🎁🎀🎂🎃🎄🎅🎆🎇✨🎌🎍🎎🎏🎐🎑🎋🎓🎗🎟🎫🎪🎭🎨🎬🎤🎧🎼🎵🎶🎹🎺🎻🥁🎸",
@@ -330,7 +321,7 @@ class StressTestUser(HttpUser):
             response_time = (end_time - start_time) * 1000
             
             if response.status_code == 200:
-                if response_time > 5000:  # 5 секунд - критический порог
+                if response_time > 5000:
                     response.failure(f"Response too slow: {response_time:.0f}ms")
                 else:
                     response.success()
@@ -340,7 +331,6 @@ class StressTestUser(HttpUser):
                 response.failure(f"HTTP {response.status_code}")
 
 
-# ========== CUSTOM EVENTS FOR METRICS ==========
 
 @events.request.add_listener
 def on_request(request_type, name, response_time, response_length, response, context, exception, **kwargs):
@@ -351,18 +341,14 @@ def on_request(request_type, name, response_time, response_length, response, con
                 data = response.json()
                 processing_time = data.get("processing_time_ms", 0)
                 
-                # Логируем медленные запросы
                 if processing_time > 1000:
                     print(f"⚠️ Slow processing: {processing_time}ms for {name}")
                 
-                # Проверяем качество детекции
                 if "is_spam" in data and "confidence" in data:
                     confidence = data["confidence"]
                     if confidence < 0.1 or confidence > 0.9:
-                        # Высокая уверенность - хорошо
                         pass
                     else:
-                        # Низкая уверенность может указывать на проблемы
                         pass
                         
             except (json.JSONDecodeError, AttributeError):
@@ -403,7 +389,6 @@ def on_test_stop(environment, **kwargs):
         print(f"   Min response time: {stats.total.min_response_time:.0f}ms")
         print(f"   RPS: {stats.total.total_rps:.1f}")
         
-        # Проверка KPI
         print("\n🎯 KPI Check:")
         
         if failure_rate <= 0.1:
@@ -429,7 +414,6 @@ def on_test_stop(environment, **kwargs):
             print(f"   ❌ Throughput: {stats.total.total_rps:.1f} RPS (target: ≥ 100 RPS)")
 
 
-# ========== PERFORMANCE TEST SCENARIOS ==========
 
 """
 Команды для запуска различных сценариев:

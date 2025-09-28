@@ -9,7 +9,6 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-# revision identifiers, used by Alembic.
 revision = '004_create_chats_table'
 down_revision = '003_add_bothub_fields'
 branch_labels = None
@@ -17,7 +16,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Создаем таблицу chats
     op.create_table('chats',
         sa.Column('id', sa.BigInteger(), nullable=False),
         sa.Column('chat_id', sa.BigInteger(), nullable=False),
@@ -36,27 +34,22 @@ def upgrade() -> None:
         sa.UniqueConstraint('chat_id'),
     )
     
-    # Создаем индексы
     op.create_index('ix_chats_owner_user_id', 'chats', ['owner_user_id'])
     op.create_index('ix_chats_chat_id', 'chats', ['chat_id'])
     op.create_index('ix_chats_is_active', 'chats', ['is_active'])
     op.create_index('ix_chats_owner_active', 'chats', ['owner_user_id', 'is_active'])
     
-    # Создаем внешний ключ на users
     op.create_foreign_key('fk_chats_owner_user_id', 'chats', 'users', ['owner_user_id'], ['telegram_id'])
 
 
 def downgrade() -> None:
-    # Удаляем внешний ключ
     op.drop_constraint('fk_chats_owner_user_id', 'chats', type_='foreignkey')
     
-    # Удаляем индексы
     op.drop_index('ix_chats_owner_active', table_name='chats')
     op.drop_index('ix_chats_is_active', table_name='chats')
     op.drop_index('ix_chats_chat_id', table_name='chats')
     op.drop_index('ix_chats_owner_user_id', table_name='chats')
     
-    # Удаляем таблицу
     op.drop_table('chats')
 
 

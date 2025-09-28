@@ -1,4 +1,3 @@
-# src/adapter/gateway/telegram_chat_gateway.py
 """
 Gateway для работы с Telegram Chat API
 Автоматическое определение владельца группы и администраторов
@@ -99,7 +98,6 @@ class TelegramChatGateway:
         try:
             administrators = await self.get_chat_administrators(chat_id)
             
-            # Ищем владельца (статус 'creator')
             for admin in administrators:
                 if admin["status"] == "creator":
                     logger.info(f"Found chat owner: {admin['user_id']} in chat {chat_id}")
@@ -145,7 +143,6 @@ class TelegramChatGateway:
             if not bot_member:
                 return False
             
-            # Бот должен быть администратором с правами на удаление сообщений
             return (
                 bot_member["status"] in ["creator", "administrator"] and
                 bot_member["can_delete_messages"]

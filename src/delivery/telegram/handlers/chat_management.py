@@ -1,4 +1,3 @@
-# src/delivery/telegram/handlers/chat_management.py
 """
 Обработчики для управления группами через интерактивную клавиатуру
 """
@@ -28,6 +27,14 @@ class ChatCallback(CallbackData, prefix="chat"):
     value: str = ""
 
 
+class BannedUsersCallback(CallbackData, prefix="banned"):
+    """Callback data для управления забаненными пользователями"""
+    action: str
+    chat_id: int
+    user_id: int = 0
+    page: int = 0
+
+
 class ChatManagementState(StatesGroup):
     waiting_for_threshold_value = State()
     waiting_for_system_prompt = State()
@@ -47,7 +54,7 @@ class ChatManagementHandler:
 
         for chat in chats:
             status_emoji = "🟢" if chat.is_active else "🔴"
-            monitor_emoji = "👁️" if chat.is_monitored else "🚫"
+            monitor_emoji = "🛡️" if chat.is_monitored else "🚫"
 
             button_text = f"{status_emoji}{monitor_emoji} {chat.display_name[:30]}"
             buttons.append([
@@ -61,7 +68,8 @@ class ChatManagementHandler:
 
     def _create_chat_menu_keyboard(self, chat: Chat) -> InlineKeyboardMarkup:
         """Создает клавиатуру управления конкретной группой"""
-        monitor_text = "🚫 Выключить мониторинг" if chat.is_monitored else "👁️ Включить мониторинг"
+        monitor_text = "🚫 Выключить защиту" if chat.is_monitored else "🛡️ Включить защиту"
+        notification_text = "🔕 Выключить уведомления" if chat.ban_notifications_enabled else "🔔 Включить уведомления"
 
         buttons = [
             [
@@ -72,20 +80,24 @@ class ChatManagementHandler:
             ],
             [
                 InlineKeyboardButton(
-                    text="⚙️ Настройки",
-                    callback_data=ChatCallback(action="settings", chat_id=chat.telegram_id).pack()
-                )
-            ],
-            [
-                InlineKeyboardButton(
                     text=monitor_text,
                     callback_data=ChatCallback(action="toggle_monitoring", chat_id=chat.telegram_id).pack()
                 )
             ],
             [
                 InlineKeyboardButton(
+                    text=notification_text,
+                    callback_data=ChatCallback(action="toggle_notifications", chat_id=chat.telegram_id).pack()
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🎯 Изменить порог спама",
                     callback_data=ChatCallback(action="set_threshold", chat_id=chat.telegram_id).pack()
+                ),
+                InlineKeyboardButton(
+                    text="🚫 Забаненные",
+                    callback_data=ChatCallback(action="banned_users", chat_id=chat.telegram_id).pack()
                 )
             ],
             [
@@ -126,8 +138,13 @@ class ChatManagementHandler:
         ]
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-    async def cmd_manage(self, message: types.Message, user: User, **kwargs) -> None:
+    async def cmd_manage(self, message: types.Message, **kwargs) -> None:
         """Команда /manage - показывает список групп с клавиатурой"""
+        user = kwargs.get("user")
+        if not user:
+            await message.reply("❌ Пользователь не найден")
+            return
+
         try:
             chats = await self.chat_repository.get_user_chats(user.telegram_id, active_only=True)
 
@@ -147,18 +164,24 @@ class ChatManagementHandler:
             text += f"📊 Всего групп: {len(chats)}"
 
             keyboard = self._create_chat_list_keyboard(chats)
+
             await message.reply(text, reply_markup=keyboard, parse_mode="HTML")
 
         except Exception as e:
             logger.error(f"Error in cmd_manage: {e}")
             await message.reply("❌ Ошибка при получении списка групп.")
 
-    async def cmd_my_chats(self, message: types.Message, user: User, **kwargs) -> None:
+    async def cmd_my_chats(self, message: types.Message, **kwargs) -> None:
         """Команда /my_chats - показывает список групп (алиас для /manage)"""
-        await self.cmd_manage(message, user, **kwargs)
+        await self.cmd_manage(message, **kwargs)
 
-    async def callback_select_chat(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, **kwargs) -> None:
+    async def callback_select_chat(self, callback: types.CallbackQuery, callback_data: ChatCallback, **kwargs) -> None:
         """Обработка выбора группы из списка"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
                 callback_data.chat_id, user.telegram_id
@@ -169,13 +192,14 @@ class ChatManagementHandler:
                 return
 
             status_emoji = "🟢" if chat.is_active else "🔴"
-            monitor_emoji = "👁️" if chat.is_monitored else "🚫"
+            monitor_emoji = "🛡️" if chat.is_monitored else "🚫"
 
             text = f"⚙️ <b>Управление группой:</b> {chat.display_name}\n\n"
             text += f"💬 Chat ID: <code>{chat.telegram_id}</code>\n"
             text += f"📊 Статус: {status_emoji} {'Активна' if chat.is_active else 'Неактивна'}\n"
-            text += f"👁️ Мониторинг: {monitor_emoji} {'Включен' if chat.is_monitored else 'Выключен'}\n"
+            text += f"🛡️ Антиспам защита: {monitor_emoji} {'Включена' if chat.is_monitored else 'Выключена'}\n"
             text += f"🎯 Порог спама: {chat.spam_threshold}\n"
+            text += f"🔔 Уведомления о банах: {'✅ Включены' if chat.ban_notifications_enabled else '❌ Выключены'}\n"
             text += f"📅 Добавлена: {chat.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
             text += "Выберите действие:"
 
@@ -187,8 +211,13 @@ class ChatManagementHandler:
             logger.error(f"Error in callback_select_chat: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
 
-    async def callback_stats(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, **kwargs) -> None:
+    async def callback_stats(self, callback: types.CallbackQuery, callback_data: ChatCallback, **kwargs) -> None:
         """Показать статистику группы"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
                 callback_data.chat_id, user.telegram_id
@@ -203,12 +232,12 @@ class ChatManagementHandler:
             text = f"📊 <b>Статистика группы:</b> {chat.display_name}\n\n"
             text += f"💬 Chat ID: <code>{chat.telegram_id}</code>\n"
             text += f"📅 Добавлена: {chat.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-            text += f"👁️ Мониторинг: {'Включен' if chat.is_monitored else 'Выключен'}\n"
+            text += f"🛡️ Антиспам защита: {'Включена' if chat.is_monitored else 'Выключена'}\n"
             text += f"🎯 Порог спама: {chat.spam_threshold}\n\n"
             text += f"📈 <b>Общая статистика:</b>\n"
             text += f"• Всего групп: {stats.get('total_chats', 0)}\n"
             text += f"• Активных: {stats.get('active_chats', 0)}\n"
-            text += f"• С мониторингом: {stats.get('monitored_chats', 0)}"
+            text += f"• С защитой: {stats.get('monitored_chats', 0)}"
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(
@@ -224,12 +253,14 @@ class ChatManagementHandler:
             logger.error(f"Error in callback_stats: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
 
-    async def callback_settings(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, **kwargs) -> None:
-        """Показать настройки группы"""
-        await self.callback_select_chat(callback, callback_data, user, **kwargs)
 
-    async def callback_toggle_monitoring(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, **kwargs) -> None:
-        """Переключить мониторинг"""
+    async def callback_toggle_monitoring(self, callback: types.CallbackQuery, callback_data: ChatCallback, **kwargs) -> None:
+        """Переключить антиспам защиту"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
                 callback_data.chat_id, user.telegram_id
@@ -242,18 +273,22 @@ class ChatManagementHandler:
             chat.is_monitored = not chat.is_monitored
             await self.chat_repository.update_chat(chat)
 
-            status = "включен" if chat.is_monitored else "выключен"
-            await callback.answer(f"✅ Мониторинг {status}", show_alert=True)
+            status = "включена" if chat.is_monitored else "выключена"
+            await callback.answer(f"✅ Антиспам защита {status}", show_alert=True)
 
-            # Обновляем меню
-            await self.callback_select_chat(callback, callback_data, user, **kwargs)
+            await self.callback_select_chat(callback, callback_data, **kwargs)
 
         except Exception as e:
             logger.error(f"Error in callback_toggle_monitoring: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
 
-    async def callback_set_threshold(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, state: FSMContext, **kwargs) -> None:
+    async def callback_set_threshold(self, callback: types.CallbackQuery, callback_data: ChatCallback, state: FSMContext, **kwargs) -> None:
         """Запросить новый порог спама"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
                 callback_data.chat_id, user.telegram_id
@@ -269,7 +304,7 @@ class ChatManagementHandler:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(
                     text="❌ Отмена",
-                    callback_data=ChatCallback(action="select", chat_id=chat.telegram_id).pack()
+                    callback_data=ChatCallback(action="cancel_threshold", chat_id=chat.telegram_id).pack()
                 )
             ]])
 
@@ -286,8 +321,48 @@ class ChatManagementHandler:
             logger.error(f"Error in callback_set_threshold: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
 
-    async def handle_threshold_input(self, message: types.Message, user: User, state: FSMContext, **kwargs) -> None:
+    async def callback_cancel_threshold(self, callback: types.CallbackQuery, callback_data: ChatCallback, state: FSMContext, **kwargs) -> None:
+        """Отменить ввод порога спама"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
+        try:
+            await state.clear()
+
+            await self.callback_select_chat(callback, callback_data, **kwargs)
+            await callback.answer("❌ Ввод порога отменен")
+
+        except Exception as e:
+            logger.error(f"Error in callback_cancel_threshold: {e}")
+            await callback.answer("❌ Ошибка", show_alert=True)
+
+    async def callback_cancel_prompt(self, callback: types.CallbackQuery, callback_data: ChatCallback, state: FSMContext, **kwargs) -> None:
+        """Отменить ввод системного промпта"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
+        try:
+            await state.clear()
+
+            await self.callback_select_chat(callback, callback_data, **kwargs)
+            await callback.answer("❌ Ввод промпта отменен")
+
+        except Exception as e:
+            logger.error(f"Error in callback_cancel_prompt: {e}")
+            await callback.answer("❌ Ошибка", show_alert=True)
+
+    async def handle_threshold_input(self, message: types.Message, state: FSMContext, **kwargs) -> None:
         """Обработка ввода порога спама"""
+        user = kwargs.get("user")
+        if not user:
+            await message.reply("❌ Пользователь не найден")
+            await state.clear()
+            return
+
         try:
             data = await state.get_data()
             chat_id = data.get("chat_id")
@@ -319,7 +394,7 @@ class ChatManagementHandler:
             text += f"⚙️ <b>Управление группой:</b> {chat.display_name}\n\n"
             text += f"💬 Chat ID: <code>{chat.telegram_id}</code>\n"
             text += f"📊 Статус: {'🟢 Активна' if chat.is_active else '🔴 Неактивна'}\n"
-            text += f"👁️ Мониторинг: {'🟢 Включен' if chat.is_monitored else '🚫 Выключен'}\n"
+            text += f"🛡️ Антиспам защита: {'🟢 Включена' if chat.is_monitored else '🚫 Выключена'}\n"
             text += f"🎯 Порог спама: {chat.spam_threshold}\n\n"
             text += "Выберите действие:"
 
@@ -332,8 +407,13 @@ class ChatManagementHandler:
             await message.reply("❌ Ошибка при установке порога")
             await state.clear()
 
-    async def callback_system_prompt(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, state: FSMContext, **kwargs) -> None:
+    async def callback_system_prompt(self, callback: types.CallbackQuery, callback_data: ChatCallback, state: FSMContext, **kwargs) -> None:
         """Показать/установить системный промпт для группы"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
                 callback_data.chat_id, user.telegram_id
@@ -359,19 +439,36 @@ class ChatManagementHandler:
                 [
                     InlineKeyboardButton(
                         text="❌ Отмена",
-                        callback_data=ChatCallback(action="select", chat_id=chat.telegram_id).pack()
+                        callback_data=ChatCallback(action="cancel_prompt", chat_id=chat.telegram_id).pack()
                     )
                 ]
             ])
 
-            text = f"📝 <b>Системный промпт для:</b> {chat.display_name}\n\n"
+            base_text = f"📝 <b>Системный промпт для:</b> {chat.display_name}\n\n"
+            footer_text = "\n\n⌨️ Введите новый системный промпт для этой группы или нажмите 'Очистить' для использования промпта по умолчанию."
 
             if chat.system_prompt:
-                text += f"📝 <b>Текущий промпт:</b>\n{chat.system_prompt}\n\n"
-            else:
-                text += f"📄 <b>Используется промпт по умолчанию:</b>\n{default_prompt}\n\n"
+                prompt_prefix = "📝 <b>Текущий промпт:</b>\n"
+                # Рассчитываем доступное место для самого промпта
+                fixed_parts_length = len(base_text) + len(prompt_prefix) + len(footer_text)
+                available_space = 4096 - fixed_parts_length - 50  # 50 символов запас для "обрезан" текста
 
-            text += "⌨️ Введите новый системный промпт для этой группы или нажмите 'Очистить' для использования промпта по умолчанию."
+                prompt_display = chat.system_prompt
+                if len(prompt_display) > available_space:
+                    prompt_display = prompt_display[:available_space-30] + "...\n\n📏 Промпт обрезан"
+
+                text = base_text + prompt_prefix + prompt_display + footer_text
+            else:
+                prompt_prefix = "📄 <b>Используется промпт по умолчанию:</b>\n"
+                # Рассчитываем доступное место для default промпта
+                fixed_parts_length = len(base_text) + len(prompt_prefix) + len(footer_text)
+                available_space = 4096 - fixed_parts_length - 50  # 50 символов запас для "обрезан" текста
+
+                prompt_display = default_prompt
+                if len(prompt_display) > available_space:
+                    prompt_display = prompt_display[:available_space-30] + "...\n\n📏 Промпт обрезан"
+
+                text = base_text + prompt_prefix + prompt_display + footer_text
 
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
             await callback.answer()
@@ -380,8 +477,13 @@ class ChatManagementHandler:
             logger.error(f"Error in callback_system_prompt: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
 
-    async def callback_delete_confirm(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, **kwargs) -> None:
+    async def callback_delete_confirm(self, callback: types.CallbackQuery, callback_data: ChatCallback, **kwargs) -> None:
         """Подтверждение удаления группы"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
                 callback_data.chat_id, user.telegram_id
@@ -404,8 +506,13 @@ class ChatManagementHandler:
             logger.error(f"Error in callback_delete_confirm: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
 
-    async def callback_delete(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, **kwargs) -> None:
+    async def callback_delete(self, callback: types.CallbackQuery, callback_data: ChatCallback, **kwargs) -> None:
         """Удаление группы"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
                 callback_data.chat_id, user.telegram_id
@@ -420,7 +527,6 @@ class ChatManagementHandler:
             if success:
                 await callback.answer(f"✅ Группа {chat.display_name} удалена", show_alert=True)
 
-                # Возвращаемся к списку групп
                 chats = await self.chat_repository.get_user_chats(user.telegram_id, active_only=True)
 
                 if not chats:
@@ -440,8 +546,14 @@ class ChatManagementHandler:
             logger.error(f"Error in callback_delete: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
 
-    async def handle_system_prompt_input(self, message: types.Message, user: User, state: FSMContext, **kwargs) -> None:
+    async def handle_system_prompt_input(self, message: types.Message, state: FSMContext, **kwargs) -> None:
         """Обработка ввода системного промпта"""
+        user = kwargs.get("user")
+        if not user:
+            await message.reply("❌ Пользователь не найден")
+            await state.clear()
+            return
+
         try:
             data = await state.get_data()
             chat_id = data.get("chat_id")
@@ -457,7 +569,6 @@ class ChatManagementHandler:
                 await state.clear()
                 return
 
-            # Устанавливаем новый системный промпт
             chat.system_prompt = message.text.strip()
             await self.chat_repository.update_chat(chat)
 
@@ -465,7 +576,7 @@ class ChatManagementHandler:
             text += f"⚙️ <b>Управление группой:</b> {chat.display_name}\n\n"
             text += f"💬 Chat ID: <code>{chat.telegram_id}</code>\n"
             text += f"📊 Статус: {'🟢 Активна' if chat.is_active else '🔴 Неактивна'}\n"
-            text += f"👁️ Мониторинг: {'🟢 Включен' if chat.is_monitored else '🚫 Выключен'}\n"
+            text += f"🛡️ Антиспам защита: {'🟢 Включена' if chat.is_monitored else '🚫 Выключена'}\n"
             text += f"🎯 Порог спама: {chat.spam_threshold}\n\n"
             text += "Выберите действие:"
 
@@ -478,8 +589,13 @@ class ChatManagementHandler:
             await message.reply("❌ Ошибка при установке промпта")
             await state.clear()
 
-    async def callback_clear_prompt(self, callback: types.CallbackQuery, callback_data: ChatCallback, user: User, state: FSMContext, **kwargs) -> None:
+    async def callback_clear_prompt(self, callback: types.CallbackQuery, callback_data: ChatCallback, state: FSMContext, **kwargs) -> None:
         """Очистить системный промпт (использовать по умолчанию)"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
                 callback_data.chat_id, user.telegram_id
@@ -495,15 +611,19 @@ class ChatManagementHandler:
 
             await callback.answer("✅ Системный промпт очищен. Используется промпт по умолчанию.", show_alert=True)
 
-            # Обновляем меню
-            await self.callback_select_chat(callback, callback_data, user, **kwargs)
+            await self.callback_select_chat(callback, callback_data, **kwargs)
 
         except Exception as e:
             logger.error(f"Error in callback_clear_prompt: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
 
-    async def callback_back_to_list(self, callback: types.CallbackQuery, user: User, **kwargs) -> None:
+    async def callback_back_to_list(self, callback: types.CallbackQuery, **kwargs) -> None:
         """Вернуться к списку групп"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
         try:
             chats = await self.chat_repository.get_user_chats(user.telegram_id, active_only=True)
 
@@ -516,12 +636,197 @@ class ChatManagementHandler:
             text += f"📊 Всего групп: {len(chats)}"
 
             keyboard = self._create_chat_list_keyboard(chats)
+
             await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
             await callback.answer()
 
         except Exception as e:
             logger.error(f"Error in callback_back_to_list: {e}")
             await callback.answer("❌ Ошибка", show_alert=True)
+
+    async def callback_toggle_notifications(self, callback: types.CallbackQuery, callback_data: ChatCallback, **kwargs) -> None:
+        """Переключить уведомления о банах для конкретной группы"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
+        try:
+            chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
+                callback_data.chat_id, user.telegram_id
+            )
+
+            if not chat:
+                await callback.answer("❌ Группа не найдена", show_alert=True)
+                return
+
+            chat.ban_notifications_enabled = not chat.ban_notifications_enabled
+            await self.chat_repository.update_chat(chat)
+
+            status = "включены" if chat.ban_notifications_enabled else "выключены"
+            await callback.answer(f"✅ Уведомления о банах {status}", show_alert=True)
+
+            await self.callback_select_chat(callback, callback_data, **kwargs)
+
+        except Exception as e:
+            logger.error(f"Error in callback_toggle_notifications: {e}")
+            await callback.answer("❌ Ошибка", show_alert=True)
+
+    async def callback_banned_users(self, callback: types.CallbackQuery, callback_data: BannedUsersCallback, **kwargs) -> None:
+        """Показать список забаненных пользователей с пагинацией"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
+        try:
+            chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
+                callback_data.chat_id, user.telegram_id
+            )
+
+            if not chat:
+                await callback.answer("❌ Группа не найдена или у вас нет прав", show_alert=True)
+                return
+
+            banned_users = await self.user_repository.get_banned_users(chat.telegram_id)
+
+            if not banned_users:
+                await callback.message.edit_text(
+                    "🚫 <b>Забаненные пользователи</b>\n\n"
+                    f"📋 Группа: <b>{chat.display_name}</b>\n\n"
+                    "✅ В этой группе нет забаненных пользователей",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="◀️ Назад",
+                            callback_data=ChatCallback(action="select", chat_id=chat.telegram_id).pack()
+                        )]
+                    ])
+                )
+                await callback.answer()
+                return
+
+            users_per_page = 5
+            page = callback_data.page
+            total_pages = (len(banned_users) + users_per_page - 1) // users_per_page
+
+            start_idx = page * users_per_page
+            end_idx = start_idx + users_per_page
+            page_users = banned_users[start_idx:end_idx]
+
+            text = f"🚫 <b>Забаненные пользователи</b>\n\n"
+            text += f"📋 Группа: <b>{chat.display_name}</b>\n"
+            text += f"📄 Страница {page + 1} из {total_pages} (всего: {len(banned_users)})\n\n"
+
+            for i, banned_user in enumerate(page_users, start=start_idx + 1):
+                text += f"{i}. <b>{banned_user['username']}</b>\n"
+                text += f"   📅 Забанен: {banned_user['banned_at']}\n"
+                text += f"   ⚠️ Причина: {banned_user['ban_reason']}\n\n"
+
+            keyboard = []
+
+            for banned_user in page_users:
+                keyboard.append([InlineKeyboardButton(
+                    text=f"🔓 Разбанить {banned_user['username'][:20]}",
+                    callback_data=f"unban_{banned_user['user_id']}_{chat.telegram_id}"
+                )])
+
+            nav_buttons = []
+            if page > 0:
+                nav_buttons.append(InlineKeyboardButton(
+                    text="⬅️ Пред.",
+                    callback_data=BannedUsersCallback(
+                        chat_id=chat.telegram_id,
+                        page=page - 1
+                    ).pack()
+                ))
+            if page < total_pages - 1:
+                nav_buttons.append(InlineKeyboardButton(
+                    text="След. ➡️",
+                    callback_data=BannedUsersCallback(
+                        chat_id=chat.telegram_id,
+                        page=page + 1
+                    ).pack()
+                ))
+
+            if nav_buttons:
+                keyboard.append(nav_buttons)
+
+            keyboard.append([InlineKeyboardButton(
+                text="◀️ Назад",
+                callback_data=ChatCallback(action="select", chat_id=chat.telegram_id).pack()
+            )])
+
+            await callback.message.edit_text(
+                text=text,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+            )
+            await callback.answer()
+
+        except Exception as e:
+            logger.error(f"Error in callback_banned_users: {e}")
+            await callback.answer("❌ Ошибка при загрузке списка", show_alert=True)
+
+    async def callback_unban_user(self, callback: types.CallbackQuery, **kwargs) -> None:
+        """Разбанить пользователя из списка"""
+        user = kwargs.get("user")
+        if not user:
+            await callback.answer("❌ Пользователь не найден", show_alert=True)
+            return
+
+        try:
+            callback_parts = callback.data.split('_')
+            if len(callback_parts) != 3 or callback_parts[0] != 'unban':
+                await callback.answer("❌ Неверный формат данных", show_alert=True)
+                return
+
+            user_id_to_unban = int(callback_parts[1])
+            chat_id = int(callback_parts[2])
+
+            chat = await self.chat_repository.get_chat_by_telegram_id_and_owner(
+                chat_id, user.telegram_id
+            )
+
+            if not chat:
+                await callback.answer("❌ Группа не найдена или у вас нет прав", show_alert=True)
+                return
+
+            try:
+                await callback.bot.unban_chat_member(
+                    chat_id=chat_id,
+                    user_id=user_id_to_unban,
+                    only_if_banned=True
+                )
+                pass
+            except Exception as e:
+                pass
+
+            await self.user_repository.unban_user(user_id_to_unban, chat_id)
+
+            user_info = await self.user_repository.get_user_info(user_id_to_unban)
+            username = user_info.get('username', f'ID {user_id_to_unban}')
+
+            await callback.answer(f"✅ Пользователь {username} разбанен", show_alert=True)
+
+            callback_data = BannedUsersCallback(chat_id=chat_id, page=0)
+            await self.callback_banned_users(callback, callback_data, **kwargs)
+
+        except (ValueError, IndexError) as e:
+            logger.error(f"Error parsing unban callback data: {e}")
+            await callback.answer("❌ Ошибка данных", show_alert=True)
+        except Exception as e:
+            logger.error(f"Error in callback_unban_user: {e}")
+            await callback.answer("❌ Ошибка при разбане", show_alert=True)
+
+    async def callback_banned_users_redirect(self, callback: types.CallbackQuery, callback_data: ChatCallback, **kwargs) -> None:
+        """Переадресация на список забаненных пользователей"""
+        banned_users_callback = BannedUsersCallback(
+            action="list",
+            chat_id=callback_data.chat_id,
+            page=0
+        )
+        await self.callback_banned_users(callback, banned_users_callback, **kwargs)
 
 
 def register_chat_management_handlers(
@@ -532,11 +837,9 @@ def register_chat_management_handlers(
     """Регистрирует обработчики команд управления группами"""
     handler = ChatManagementHandler(user_repository, chat_repository)
 
-    # Основная команда управления
     dp.message.register(handler.cmd_manage, Command("manage"))
     dp.message.register(handler.cmd_my_chats, Command("my_chats"))
 
-    # Callback handlers
     dp.callback_query.register(
         handler.callback_select_chat,
         ChatCallback.filter(F.action == "select")
@@ -544,10 +847,6 @@ def register_chat_management_handlers(
     dp.callback_query.register(
         handler.callback_stats,
         ChatCallback.filter(F.action == "stats")
-    )
-    dp.callback_query.register(
-        handler.callback_settings,
-        ChatCallback.filter(F.action == "settings")
     )
     dp.callback_query.register(
         handler.callback_toggle_monitoring,
@@ -578,8 +877,31 @@ def register_chat_management_handlers(
         handler.callback_clear_prompt,
         ChatCallback.filter(F.action == "clear_prompt")
     )
+    dp.callback_query.register(
+        handler.callback_cancel_threshold,
+        ChatCallback.filter(F.action == "cancel_threshold")
+    )
+    dp.callback_query.register(
+        handler.callback_cancel_prompt,
+        ChatCallback.filter(F.action == "cancel_prompt")
+    )
+    dp.callback_query.register(
+        handler.callback_toggle_notifications,
+        ChatCallback.filter(F.action == "toggle_notifications")
+    )
+    dp.callback_query.register(
+        handler.callback_banned_users,
+        BannedUsersCallback.filter()
+    )
+    dp.callback_query.register(
+        handler.callback_banned_users_redirect,
+        ChatCallback.filter(F.action == "banned_users")
+    )
+    dp.callback_query.register(
+        handler.callback_unban_user,
+        lambda c: c.data and c.data.startswith("unban_")
+    )
 
-    # FSM handlers
     dp.message.register(
         handler.handle_threshold_input,
         ChatManagementState.waiting_for_threshold_value

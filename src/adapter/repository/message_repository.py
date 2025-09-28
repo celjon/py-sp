@@ -12,9 +12,9 @@ class MessageRepository:
     async def save_message(self, message: Message) -> Message:
         """Сохранить сообщение в базе данных"""
         query = """
-        INSERT INTO messages (user_id, chat_id, text, role, is_spam, spam_confidence, 
-                             has_links, has_mentions, has_images, is_forward, emoji_count)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        INSERT INTO messages (user_id, chat_id, text, role, is_spam, spam_confidence,
+                             has_links, has_mentions, has_images, is_forward, emoji_count, telegram_message_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING id, created_at
         """
 
@@ -32,6 +32,7 @@ class MessageRepository:
                 message.has_images,
                 message.is_forward,
                 message.emoji_count,
+                message.telegram_message_id,
             )
 
             message.id = row["id"]
@@ -48,11 +49,11 @@ class MessageRepository:
     async def get_recent_messages(
         self, user_id: int, chat_id: int, limit: int = 10
     ) -> List[Message]:
-        """Получить последние сообщения пользователя"""
+        """Получить последние НЕ удаленные сообщения пользователя"""
         query = """
-        SELECT * FROM messages 
-        WHERE user_id = $1 AND chat_id = $2 
-        ORDER BY created_at DESC 
+        SELECT * FROM messages
+        WHERE user_id = $1 AND chat_id = $2 AND deleted_at IS NULL
+        ORDER BY created_at DESC
         LIMIT $3
         """
 
@@ -63,11 +64,11 @@ class MessageRepository:
     async def get_user_recent_messages(
         self, user_id: int, chat_id: int, hours: int = 24
     ) -> List[Message]:
-        """Получить сообщения пользователя за последние N часов"""
+        """Получить НЕ удаленные сообщения пользователя за последние N часов"""
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
         query = """
-        SELECT * FROM messages 
-        WHERE user_id = $1 AND chat_id = $2 AND created_at > $3
+        SELECT * FROM messages
+        WHERE user_id = $1 AND chat_id = $2 AND created_at > $3 AND deleted_at IS NULL
         ORDER BY created_at DESC
         """
 
@@ -85,11 +86,22 @@ class MessageRepository:
         async with self.db.acquire() as conn:
             await conn.execute(query, message_ids)
 
+    async def delete_messages(self, message_ids: List[int]) -> int:
+        """Полностью удалить сообщения из БД"""
+        if not message_ids:
+            return 0
+
+        query = "DELETE FROM messages WHERE id = ANY($1)"
+
+        async with self.db.acquire() as conn:
+            result = await conn.execute(query, message_ids)
+            deleted_count = int(result.split()[-1]) if result.split() else 0
+            return deleted_count
+
     async def get_chat_stats(self, chat_id: int, hours: int = 24) -> Dict[str, Any]:
         """Получить статистику чата за указанный период"""
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-        # Основная статистика сообщений
         messages_query = """
         SELECT 
             COUNT(*) as total_messages,
@@ -103,7 +115,6 @@ class MessageRepository:
         WHERE chat_id = $1 AND created_at > $2
         """
 
-        # Статистика по пользователям
         users_query = """
         SELECT 
             COUNT(DISTINCT user_id) FILTER (WHERE is_spam = true) as spam_users,
@@ -112,7 +123,6 @@ class MessageRepository:
         WHERE chat_id = $1 AND created_at > $2
         """
 
-        # Топ спам пользователей
         top_spammers_query = """
         SELECT 
             user_id,
@@ -125,7 +135,6 @@ class MessageRepository:
         LIMIT 5
         """
 
-        # Статистика по времени (по часам)
         hourly_stats_query = """
         SELECT 
             DATE_TRUNC('hour', created_at) as hour,
@@ -139,36 +148,29 @@ class MessageRepository:
         """
 
         async with self.db.acquire() as conn:
-            # Выполняем все запросы
             messages_stats = await conn.fetchrow(messages_query, chat_id, since)
             users_stats = await conn.fetchrow(users_query, chat_id, since)
             top_spammers = await conn.fetch(top_spammers_query, chat_id, since)
             hourly_stats = await conn.fetch(hourly_stats_query, chat_id, since)
 
-            # Обрабатываем результаты
             total_messages = messages_stats["total_messages"] or 0
             spam_messages = messages_stats["spam_messages"] or 0
             clean_messages = messages_stats["clean_messages"] or 0
 
             spam_percentage = (spam_messages / total_messages * 100) if total_messages > 0 else 0
 
-            # Формируем ответ
             stats = {
-                # Основные метрики
                 "total_messages": total_messages,
                 "spam_messages": spam_messages,
                 "clean_messages": clean_messages,
                 "deleted_messages": messages_stats["deleted_messages"] or 0,
                 "spam_percentage": round(spam_percentage, 2),
-                # Пользователи
                 "active_users": messages_stats["active_users"] or 0,
                 "spam_users": users_stats["spam_users"] or 0,
                 "clean_users": users_stats["clean_users"] or 0,
-                "banned_users": users_stats["spam_users"] or 0,  # Упрощение для совместимости
-                # Качественные метрики
+                "banned_users": users_stats["spam_users"] or 0,
                 "avg_spam_confidence": round(float(messages_stats["avg_spam_confidence"] or 0), 3),
                 "last_message_time": messages_stats["last_message_time"],
-                # Детализация
                 "top_spammers": [
                     {
                         "user_id": row["user_id"],
@@ -191,7 +193,6 @@ class MessageRepository:
                     }
                     for row in hourly_stats
                 ],
-                # Метаданные
                 "period_hours": hours,
                 "period_start": since.isoformat(),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -240,11 +241,9 @@ class MessageRepository:
         """Получить статистику конкретного пользователя"""
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-        # Базовый запрос
         base_conditions = "user_id = $1 AND created_at > $2"
         params = [user_id, since]
 
-        # Добавляем фильтр по чату если указан
         if chat_id is not None:
             base_conditions += " AND chat_id = $3"
             params.append(chat_id)
@@ -302,7 +301,6 @@ class MessageRepository:
         params = []
         param_count = 0
 
-        # Строим WHERE условия динамически
         if chat_id is not None:
             param_count += 1
             conditions.append(f"chat_id = ${param_count}")
@@ -334,11 +332,9 @@ class MessageRepository:
             conditions.append(f"created_at > ${param_count}")
             params.append(since)
 
-        # Добавляем лимит
         param_count += 1
         params.append(limit)
 
-        # Собираем запрос
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         query = f"""
         SELECT * FROM messages 
@@ -360,6 +356,7 @@ class MessageRepository:
             text=row["text"],
             role=MessageRole(row["role"]),
             created_at=row["created_at"],
+            deleted_at=row.get("deleted_at"),
             is_spam=row["is_spam"],
             spam_confidence=row["spam_confidence"],
             has_links=row["has_links"],
@@ -367,4 +364,5 @@ class MessageRepository:
             has_images=row["has_images"],
             is_forward=row["is_forward"],
             emoji_count=row["emoji_count"],
+            telegram_message_id=row.get("telegram_message_id"),
         )

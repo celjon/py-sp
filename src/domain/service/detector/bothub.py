@@ -1,4 +1,3 @@
-# src/domain/service/detector/bothub.py
 """
 BotHub Spam Detector - детектор спама на основе BotHub LLM
 """
@@ -39,14 +38,12 @@ class BotHubDetector:
         self.gateway = bothub_gateway
         self.config = config or {}
         
-        # Настройки детекции
         self.min_text_length = self.config.get("min_text_length", 5)
         self.max_text_length = self.config.get("max_text_length", 4000)
-        self.timeout = self.config.get("timeout", 10.0)
+        self.timeout = self.config.get("timeout", 60.0)
         self.max_retries = self.config.get("max_retries", 2)
         self.retry_delay = self.config.get("retry_delay", 1.0)
         
-        # Статистика
         self._total_requests = 0
         self._total_processing_time = 0.0
         self._successful_requests = 0
@@ -76,7 +73,6 @@ class BotHubDetector:
         logger.debug(f"🤖 BotHub анализ: '{text[:50]}{'...' if len(text) > 50 else ''}'")
 
         try:
-            # Валидация входных данных
             if len(text.strip()) < self.min_text_length:
                 logger.debug(f"[WARN] Текст слишком короткий для BotHub: {len(text)} символов")
                 return DetectorResult(
@@ -88,30 +84,26 @@ class BotHubDetector:
                 )
 
             if len(text) > self.max_text_length:
-                # Обрезаем текст
                 text = text[:self.max_text_length]
                 logger.warning(f"[WARN] Текст обрезан до {self.max_text_length} символов")
 
-            # Подготавливаем контекст для анализа
             analysis_context = self._prepare_analysis_context(message, user_context)
 
-            # Выполняем анализ с retry logic
             bothub_result = await self._analyze_with_retry(text, analysis_context)
 
             processing_time_ms = (time.time() - start_time) * 1000
             self._total_processing_time += processing_time_ms
 
-            # Парсим результат
             if bothub_result:
                 is_spam, confidence, token_usage = bothub_result
                 self._successful_requests += 1
-                
-                # Формируем детали
+
                 details = {
                     "model": self.gateway.model,
                     "tokens_used": token_usage.get("total_tokens", 0),
                     "processing_time_ms": processing_time_ms,
-                    "user_context_provided": bool(user_context)
+                    "user_context_provided": bool(user_context),
+                    "raw_confidence": token_usage.get("raw_confidence", confidence)
                 }
                 
                 return DetectorResult(
@@ -165,7 +157,6 @@ class BotHubDetector:
                     await asyncio.sleep(self.retry_delay * attempt)
                     logger.debug(f"🔄 BotHub retry attempt {attempt}")
                 
-                # Вызываем BotHub API
                 result = await self.gateway.check_spam(text, context)
                 return result
                 
@@ -235,7 +226,6 @@ class BotHubDetector:
         """
         self.config.update(new_config)
         
-        # Обновляем настройки
         self.min_text_length = self.config.get("min_text_length", self.min_text_length)
         self.max_text_length = self.config.get("max_text_length", self.max_text_length)
         self.timeout = self.config.get("timeout", self.timeout)
@@ -252,7 +242,6 @@ class BotHubDetector:
             Статус детектора
         """
         try:
-            # Проверяем здоровье gateway
             gateway_health = await self.gateway.health_check()
             
             return {

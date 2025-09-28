@@ -12,7 +12,7 @@ class SampleType(Enum):
     """Тип образца"""
 
     SPAM = "spam"
-    HAM = "ham"  # Не спам
+    HAM = "ham"
 
 
 class SampleSource(Enum):
@@ -34,14 +34,11 @@ class SpamSample:
     chat_id: Optional[int] = None
     user_id: Optional[int] = None
 
-    # Идентификатор (заполняется после сохранения в БД)
     id: Optional[int] = None
 
-    # Метаданные
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
-    # Дополнительная информация
     language: Optional[str] = None
     confidence: Optional[float] = None
     tags: list[str] = field(default_factory=list)
@@ -49,7 +46,6 @@ class SpamSample:
     def __post_init__(self) -> None:
         """Автоматическое определение языка"""
         if not self.language:
-            # Простая эвристика для определения языка
             cyrillic_chars = sum(1 for c in self.text if "\u0400" <= c <= "\u04ff")
             if cyrillic_chars > len(self.text) * 0.3:
                 self.language = "ru"

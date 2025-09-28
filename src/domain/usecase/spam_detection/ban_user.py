@@ -9,6 +9,9 @@ class UserRepository(Protocol):
 
     async def get_user(self, telegram_id: int) -> User: ...
     async def update_user_status(self, telegram_id: int, status: UserStatus) -> None: ...
+    async def save_ban_info(self, user_id: int, chat_id: int, banned_by_admin_id: int = None,
+                           ban_reason: str = "spam_detection", banned_message: str = "", username: str = None) -> None: ...
+    async def remove_from_approved(self, telegram_id: int, chat_id: int) -> None: ...
 
 
 class MessageRepository(Protocol):
@@ -16,6 +19,7 @@ class MessageRepository(Protocol):
 
     async def get_recent_messages(self, user_id: int, chat_id: int, limit: int = 10) -> List: ...
     async def mark_messages_deleted(self, message_ids: List[int]) -> None: ...
+    async def delete_messages(self, message_ids: List[int]) -> int: ...
 
 
 class TelegramGateway(Protocol):
@@ -71,7 +75,6 @@ class BanUserUseCase:
         }
 
         try:
-            # Получаем пользователя (только если требуется)
             user = None
             if require_user_in_db:
                 user = await self.user_repo.get_user(user_id)
@@ -79,14 +82,26 @@ class BanUserUseCase:
                     result["error"] = "User not found"
                     return result
 
-            # Выполняем действие в зависимости от типа
             if ban_type == "permanent" or detection_result.should_ban:
                 success = await self._ban_user(chat_id, user_id)
                 if success:
                     result["banned"] = True
-                    # Обновляем статус в БД только если пользователь существует
-                    if user:
-                        await self.user_repo.update_user_status(user_id, UserStatus.BANNED)
+                    username = user.username if user else f"User {user_id}"
+                    banned_message = ""
+                    if hasattr(detection_result, 'metadata') and detection_result.metadata:
+                        banned_message = detection_result.metadata.get('notes', '')[:500]
+
+                    await self.user_repo.save_ban_info(
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        banned_by_admin_id=None,
+                        ban_reason="spam_detection",
+                        banned_message=banned_message,
+                        username=username
+                    )
+
+                    # Удаляем пользователя из белого списка при бане
+                    await self.user_repo.remove_from_approved(user_id, chat_id)
                 else:
                     result["error"] = "Failed to ban user via Telegram API"
                     return result
@@ -95,7 +110,6 @@ class BanUserUseCase:
                 success = await self._restrict_user(chat_id, user_id)
                 if success:
                     result["restricted"] = True
-                    # Обновляем статус в БД только если пользователь существует
                     if user:
                         await self.user_repo.update_user_status(user_id, UserStatus.RESTRICTED)
                 else:
@@ -103,11 +117,8 @@ class BanUserUseCase:
                     return result
 
             elif ban_type == "warn" or detection_result.should_warn:
-                # Для предупреждения просто помечаем пользователя
                 result["warned"] = True
-                # Не меняем статус в базе данных для предупреждений
 
-            # Удаляем сообщения если требуется
             if detection_result.should_delete:
                 deleted_count = await self._delete_user_messages(
                     chat_id, user_id, aggressive_cleanup
@@ -146,32 +157,31 @@ class BanUserUseCase:
         deleted_count = 0
 
         try:
-            # Определяем количество сообщений для удаления
             limit = 100 if aggressive_cleanup else 10
 
-            # Получаем недавние сообщения пользователя
             recent_messages = await self.message_repo.get_recent_messages(
                 user_id=user_id, chat_id=chat_id, limit=limit
             )
 
-            # Удаляем сообщения через Telegram API
             message_ids = []
             for msg in recent_messages:
                 try:
+                    if not msg.telegram_message_id:
+                        continue
+
                     success = await self.telegram_gateway.delete_message(
-                        chat_id=chat_id, message_id=msg.id
+                        chat_id=chat_id, message_id=msg.telegram_message_id
                     )
                     if success:
                         deleted_count += 1
                         message_ids.append(msg.id)
-                except Exception as e:
-                    print(f"Failed to delete message {msg.id}: {e}")
+                except Exception:
+                    pass
 
-            # Помечаем сообщения как удаленные в базе данных
             if message_ids:
-                await self.message_repo.mark_messages_deleted(message_ids)
+                await self.message_repo.delete_messages(message_ids)
 
-        except Exception as e:
-            print(f"Error deleting user messages: {e}")
+        except Exception:
+            pass
 
         return deleted_count

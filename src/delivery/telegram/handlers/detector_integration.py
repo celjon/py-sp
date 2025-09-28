@@ -21,22 +21,15 @@ async def spam_detection_integration(message: types.Message, **kwargs):
     """
     deps: Dict[str, Any] = kwargs.get("deps", {})
     
-    # Проверяем владение чатом
     is_chat_owner = kwargs.get("is_chat_owner", False)
     if not is_chat_owner:
-        # Пользователь не является владельцем чата, пропускаем обработку
         return
 
-    # Получаем стандартный use case для проверки сообщений
     check_message_usecase = deps.get("check_message_usecase")
 
     if not check_message_usecase:
-        # Если use case недоступен, просто пропускаем
         return
 
-    # Все проверки выполняются через EnsembleDetector
-    # который использует только CAS, RuSpam и BotHub
-    # Никаких эвристических алгоритмов!
 
 
 @router.message(Command("detector_status"))
@@ -52,11 +45,9 @@ async def cmd_detector_status(message: types.Message, **kwargs):
 
         status_text = "🔍 <b>Статус детекторов</b>\n\n"
 
-        # Проверяем CAS
         cas_gateway = deps.get("cas_gateway")
         if cas_gateway:
             try:
-                # Тестовая проверка CAS
                 test_result = await cas_gateway.health_check() if hasattr(cas_gateway, 'health_check') else {"status": "unknown"}
                 cas_status = "🟢 Активен" if test_result.get("status") != "error" else "🔴 Ошибка"
             except Exception:
@@ -66,7 +57,6 @@ async def cmd_detector_status(message: types.Message, **kwargs):
 
         status_text += f"🛡️ CAS (Combot Anti-Spam): {cas_status}\n"
 
-        # Проверяем BotHub
         bothub_gateway = deps.get("bothub_gateway")
         if bothub_gateway:
             try:
@@ -78,7 +68,6 @@ async def cmd_detector_status(message: types.Message, **kwargs):
 
         status_text += f"🤖 BotHub: {bothub_status}\n"
 
-        # RuSpam всегда доступен (встроенный)
         status_text += f"🇷🇺 RuSpam: 🟢 Активен\n"
 
         status_text += f"\n📊 <b>Активные детекторы</b>: Только проверенные системы без эвристик"
@@ -99,7 +88,6 @@ async def cmd_antispam_stats(message: types.Message, **kwargs):
         message_repo = deps.get("message_repository")
 
         if message_repo:
-            # Получаем реальную статистику из БД
             try:
                 stats = await message_repo.get_chat_stats(message.chat.id, hours=24)
                 stats_text = (

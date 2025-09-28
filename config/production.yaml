@@ -28,7 +28,7 @@ spam_detection:
     # BotHub настройки (заменяет OpenRouter)
     bothub_min_length: 10        # Длиннее тексты для LLM
     use_bothub_fallback: true
-    bothub_timeout: 3.0          # Меньше таймаут
+    bothub_timeout: 60.0          # Меньше таймаут
     bothub_min_ruspam_confidence: 0.2  # Минимальная уверенность RUSpam для вызова BotHub
 
 # RUSpam production
@@ -42,11 +42,11 @@ ruspam:
 
 # BotHub production (новый провайдер)
 bothub:
-  model: "gpt-4o-mini"  # Модель по умолчанию
-  max_tokens: 150
+  model: "gpt-5-nano"  # Модель по умолчанию
+  max_tokens: 300
   temperature: 0.0
   # Дополнительные настройки
-  timeout: 3.0
+  timeout: 60.0
   max_retries: 1
   retry_delay: 1.0
 

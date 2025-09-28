@@ -1,4 +1,3 @@
-# src/config/dependencies.py
 """
 Production-ready Dependency Injection Setup для Telegram бота
 Связывает все компоненты в единую систему
@@ -12,26 +11,24 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from fastapi import HTTPException
 
-# Repositories
 from ..adapter.repository.user_repository import UserRepository
 from ..adapter.repository.message_repository import MessageRepository
 from ..adapter.repository.spam_samples_repository import SpamSamplesRepository
 from ..adapter.repository.chat_repository import ChatRepository
 
-# Use Cases
 from ..domain.usecase.spam_detection.check_message import CheckMessageUseCase
 from ..domain.usecase.spam_detection.ban_user import BanUserUseCase
 
-# Infrastructure
+from ..domain.service.cleanup.message_cleanup import MessageCleanupService
+from ..domain.service.cleanup.background_cleanup import BackgroundCleanupService
+
 from ..lib.clients.postgres_client import PostgresClient
 from ..lib.clients.http_client import HttpClient
 
-# Gateways
 from ..adapter.gateway.cas_gateway import CASGateway
 from ..adapter.gateway.bothub_gateway import BotHubGateway
 from ..adapter.gateway.telegram_chat_gateway import TelegramChatGateway
 
-# Domain Services
 from ..domain.service.detector.ensemble import EnsembleDetector
 from ..adapter.cache.redis_cache import RedisCache
 from ..domain.service.monitoring.prometheus_metrics import create_prometheus_metrics
@@ -43,26 +40,22 @@ logger = logging.getLogger(__name__)
 class ProductionServices:
     """Контейнер для всех production сервисов - только Telegram бот"""
 
-    # Repositories
     user_repo: UserRepository
     message_repo: MessageRepository
     spam_samples_repo: SpamSamplesRepository
     chat_repo: ChatRepository
 
-    # Use Cases
     check_message_usecase: CheckMessageUseCase
     ban_user_usecase: BanUserUseCase
 
-    # Domain Services
     ensemble_detector: EnsembleDetector
     redis_cache: Optional[RedisCache]
+    background_cleanup: BackgroundCleanupService
 
-    # Gateways
     cas_gateway: Optional[CASGateway]
     bothub_gateway: Optional[BotHubGateway]
     telegram_chat_gateway: Optional[TelegramChatGateway]
 
-    # Infrastructure
     postgres_client: PostgresClient
     redis_client: Optional[Any]
     http_client: HttpClient
@@ -77,7 +70,6 @@ class ProductionServices:
                 "version": "2.0.0",
             }
 
-            # Database
             try:
                 if hasattr(self.postgres_client, "health_check"):
                     db_health = self.postgres_client.health_check()
@@ -93,7 +85,6 @@ class ProductionServices:
             except Exception as e:
                 health_info["services"]["postgres"] = {"status": "error", "error": str(e)}
 
-            # Redis
             try:
                 if self.redis_client and hasattr(self.redis_client, "health_check"):
                     redis_health = self.redis_client.health_check()
@@ -106,7 +97,6 @@ class ProductionServices:
             except Exception as e:
                 health_info["services"]["redis"] = {"status": "error", "error": str(e)}
 
-            # Ensemble Detector
             try:
                 health_info["services"][
                     "ensemble_detector"
@@ -114,7 +104,6 @@ class ProductionServices:
             except Exception as e:
                 health_info["services"]["ensemble_detector"] = {"status": "error", "error": str(e)}
 
-            # Gateways
             try:
                 if self.cas_gateway:
                     health_info["services"]["cas_gateway"] = await self.cas_gateway.health_check()
@@ -133,7 +122,6 @@ class ProductionServices:
             except Exception as e:
                 health_info["services"]["bothub_gateway"] = {"status": "error", "error": str(e)}
 
-            # Определяем общий статус
             error_count = sum(
                 1 for service in health_info["services"].values()
                 if service.get("status") == "error"
@@ -141,7 +129,7 @@ class ProductionServices:
 
             if error_count == 0:
                 health_info["status"] = "healthy"
-            elif error_count <= 2:  # Допускаем некоторые деградации
+            elif error_count <= 2:
                 health_info["status"] = "degraded"
             else:
                 health_info["status"] = "unhealthy"
@@ -171,10 +159,8 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     critical_errors = []
     warnings = []
 
-    # === INFRASTRUCTURE CLIENTS ===
     logger.info("[SETUP] Настройка клиентов инфраструктуры...")
 
-    # Database Client (КРИТИЧЕСКИЙ)
     postgres_client = None
     try:
         database_url = config.get("database_url") or config.get("database", {}).get("url")
@@ -188,7 +174,6 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         critical_errors.append(f"Database connection failed: {e}")
         logger.error(f"[ERROR] Database ошибка: {e}")
 
-    # Redis Client (НЕ критический)
     redis_client = None
     try:
         redis_url = config.get("redis_url") or (
@@ -197,7 +182,6 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
 
         if redis_url:
             logger.info(f"[CONNECT] Подключение к Redis: {redis_url}")
-            # Используем RedisCache как клиент
             redis_client = RedisCache(redis_url)
             await redis_client.connect()
 
@@ -211,7 +195,6 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         warnings.append(f"Redis недоступен: {e}")
         logger.warning(f"[WARN] Redis ошибка: {e}")
 
-    # HTTP Client
     http_client = None
     try:
         http_client = HttpClient()
@@ -220,13 +203,11 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         critical_errors.append(f"HTTP Client initialization failed: {e}")
         logger.error(f"[ERROR] HTTP Client ошибка: {e}")
 
-    # Проверяем критические ошибки
     if critical_errors:
         error_msg = "; ".join(critical_errors)
         logger.error(f"[ERROR] Критические ошибки инициализации: {error_msg}")
         raise RuntimeError(f"Critical services failed: {error_msg}")
 
-    # === REPOSITORIES ===
     logger.info("🗄️ Настройка репозиториев...")
 
     try:
@@ -239,15 +220,12 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     except Exception as e:
         raise RuntimeError(f"Repository initialization failed: {e}")
 
-    # === CACHE LAYER ===
-    redis_cache = redis_client  # redis_client уже является RedisCache
+    redis_cache = redis_client
     if redis_cache:
         logger.info("[OK] Redis Cache настроен")
 
-    # === GATEWAYS ===
     logger.info("🌐 Настройка gateways...")
 
-    # CAS Gateway
     cas_gateway = None
     try:
         cas_config = config.get("external_apis", {}).get("cas", {})
@@ -264,39 +242,30 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
         warnings.append(f"CAS Gateway initialization failed: {e}")
         logger.warning(f"[WARN] CAS Gateway ошибка: {e}")
 
-    # BotHub Gateway (новый провайдер)
     bothub_gateway = None
     try:
         bothub_config = config.get("bothub", {})
-        # BotHub Gateway будет создаваться динамически с токеном пользователя
         logger.info("[OK] BotHub Gateway готов к использованию")
     except Exception as e:
         warnings.append(f"BotHub Gateway initialization failed: {e}")
         logger.warning(f"[WARN] BotHub Gateway ошибка: {e}")
 
-    # === SPAM DETECTION SETUP ===
     logger.info("[TARGET] Настройка spam detection...")
 
-    # Ensemble Detector
     try:
         detector_config = config.get("spam_detection", {}).get("ensemble", {})
         ensemble_detector = EnsembleDetector(detector_config)
 
-        # Добавляем CAS детектор
         if cas_gateway:
             ensemble_detector.add_cas_detector(cas_gateway)
 
-        # Добавляем RUSpam детектор (критический компонент)
         ensemble_detector.add_ruspam_detector()
 
-        # BotHub детектор будет создаваться динамически с токеном пользователя
-        # ensemble_detector.add_bothub_detector(bothub_gateway) - вызывается при необходимости
 
         logger.info("[OK] Ensemble Detector настроен")
     except Exception as e:
         raise RuntimeError(f"Ensemble Detector initialization failed: {e}")
 
-    # === USE CASES ===
     logger.info("[LIST] Настройка use cases...")
 
     try:
@@ -305,40 +274,40 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
             message_repo=message_repo,
             user_repo=user_repo,
             spam_threshold=0.6,
-            max_daily_spam=3,  # Максимум 3 спама в день перед баном
+            max_daily_spam=3,
         )
 
-        # BanUserUseCase требует TelegramGateway, который создается в bot.py
-        # Поэтому создаем его позже с None
         ban_user_usecase = BanUserUseCase(
             user_repo=user_repo, 
             message_repo=message_repo, 
-            telegram_gateway=None  # Будет установлен в bot.py
+            telegram_gateway=None
         )
 
         logger.info("[OK] Use cases настроены")
     except Exception as e:
         raise RuntimeError(f"Use cases initialization failed: {e}")
 
-    # === СОЗДАЕМ КОНТЕЙНЕР СЕРВИСОВ ===
+    try:
+        message_cleanup = MessageCleanupService(message_repo)
+        background_cleanup = BackgroundCleanupService(message_cleanup)
+        logger.info("[OK] Cleanup сервисы настроены")
+    except Exception as e:
+        raise RuntimeError(f"Cleanup services initialization failed: {e}")
+
     try:
         services = ProductionServices(
-            # Repositories
             user_repo=user_repo,
             message_repo=message_repo,
             spam_samples_repo=spam_samples_repo,
             chat_repo=chat_repo,
-            # Use Cases
             check_message_usecase=check_message_usecase,
             ban_user_usecase=ban_user_usecase,
-            # Domain Services
             ensemble_detector=ensemble_detector,
             redis_cache=redis_cache,
-            # Gateways
+            background_cleanup=background_cleanup,
             cas_gateway=cas_gateway,
             bothub_gateway=bothub_gateway,
-            telegram_chat_gateway=None,  # Будет создан в bot.py
-            # Infrastructure
+            telegram_chat_gateway=None,
             postgres_client=postgres_client,
             redis_client=redis_client,
             http_client=http_client,
@@ -348,7 +317,6 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     except Exception as e:
         raise RuntimeError(f"Production Services container creation failed: {e}")
 
-    # === ФИНАЛЬНАЯ ПРОВЕРКА ===
     if warnings:
         logger.warning(f"[WARN] Предупреждения при инициализации: {'; '.join(warnings)}")
 
@@ -356,7 +324,6 @@ async def setup_production_services(config: Dict[str, Any]) -> ProductionService
     return services
 
 
-# === HELPER FUNCTIONS FOR ROUTES ===
 
 
 def get_dependencies_for_routes():
@@ -386,7 +353,6 @@ def get_dependencies_for_routes():
     }
 
 
-# === CONFIGURATION VALIDATION ===
 
 
 def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -408,7 +374,6 @@ def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
     if missing_fields:
         raise ValueError(f"Missing required configuration fields: {missing_fields}")
 
-    # Добавляем значения по умолчанию
     default_config = {
         "database": {"url": config.get("database_url")},
         "redis": {"url": config.get("redis_url")},
@@ -418,10 +383,10 @@ def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
             "timeout": 5.0,
         },
         "bothub": {
-            "model": "gpt-4o-mini",
-            "max_tokens": 150,
+            "model": "gpt-5-nano",
+            "max_tokens": 300,
             "temperature": 0.0,
-            "timeout": 10.0,
+            "timeout": 60.0,
             "max_retries": 2,
             "retry_delay": 1.0,
         },
@@ -434,13 +399,12 @@ def validate_production_config(config: Dict[str, Any]) -> Dict[str, Any]:
                 "ruspam_enabled": True,
                 "bothub_min_length": 5,
                 "use_bothub_fallback": True,
-                "bothub_timeout": 5.0,
+                "bothub_timeout": 60.0,
                 "bothub_min_ruspam_confidence": 0.2,
             }
         },
     }
 
-    # Объединяем с переданной конфигурацией
     for key, value in default_config.items():
         if key not in config:
             config[key] = value

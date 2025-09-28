@@ -1,4 +1,3 @@
-# migrations/versions/001_create_production_tables.py
 """Create production tables for AntiSpam Bot v2.0
 
 Revision ID: 001_production_tables
@@ -10,7 +9,6 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-# revision identifiers, used by Alembic.
 revision = '001_production_tables'
 down_revision = None
 branch_labels = None
@@ -20,7 +18,6 @@ depends_on = None
 def upgrade() -> None:
     """Create all production tables"""
     
-    # === API KEYS TABLE ===
     op.create_table(
         'api_keys',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -31,26 +28,21 @@ def upgrade() -> None:
         sa.Column('plan', sa.Enum('free', 'basic', 'pro', 'enterprise', name='api_key_plan'), nullable=False),
         sa.Column('status', sa.Enum('active', 'suspended', 'expired', 'revoked', name='api_key_status'), nullable=False, default='active'),
         
-        # Rate limiting
         sa.Column('requests_per_minute', sa.Integer(), nullable=False, default=60),
         sa.Column('requests_per_hour', sa.Integer(), nullable=False, default=3600),
         sa.Column('requests_per_day', sa.Integer(), nullable=False, default=5000),
         sa.Column('requests_per_month', sa.Integer(), nullable=False, default=150000),
         
-        # Security
         sa.Column('allowed_ips', postgresql.ARRAY(sa.String(45)), nullable=True, comment='Allowed IP addresses (CIDR supported)'),
         sa.Column('webhook_url', sa.String(500), nullable=True),
         
-        # Timestamps
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('last_used_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
         
-        # Metadata
         sa.Column('metadata', postgresql.JSONB(), nullable=True, comment='Additional metadata as JSON'),
         
-        # Constraints
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('key_hash', name='uq_api_keys_key_hash'),
         sa.Index('ix_api_keys_client_name', 'client_name'),
@@ -60,39 +52,31 @@ def upgrade() -> None:
         sa.Index('ix_api_keys_last_used_at', 'last_used_at')
     )
     
-    # === API USAGE RECORDS TABLE ===
     op.create_table(
         'api_usage_records',
         sa.Column('id', sa.BigInteger(), nullable=False),
         sa.Column('api_key_id', sa.Integer(), nullable=False),
         
-        # Request info
         sa.Column('endpoint', sa.String(100), nullable=False),
         sa.Column('method', sa.String(10), nullable=False),
         sa.Column('status', sa.Enum('success', 'error', 'rate_limited', 'authentication_failed', name='request_status'), nullable=False),
         
-        # Client info
         sa.Column('client_ip', sa.String(45), nullable=False),
         sa.Column('user_agent', sa.String(500), nullable=True),
         
-        # Performance metrics
         sa.Column('request_size_bytes', sa.Integer(), nullable=True, default=0),
         sa.Column('response_size_bytes', sa.Integer(), nullable=True, default=0),
         sa.Column('processing_time_ms', sa.Float(), nullable=True, comment='Request processing time in milliseconds'),
         
-        # Spam detection results
         sa.Column('is_spam_detected', sa.Boolean(), nullable=True),
         sa.Column('detection_confidence', sa.Float(), nullable=True, comment='Confidence score 0.0-1.0'),
         sa.Column('detection_reason', sa.String(50), nullable=True, comment='Primary detector: cas/ruspam/openai'),
         
-        # Timestamp
         sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         
-        # Constraints
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['api_key_id'], ['api_keys.id'], ondelete='CASCADE'),
         
-        # Indexes for analytics queries
         sa.Index('ix_usage_records_api_key_timestamp', 'api_key_id', 'timestamp'),
         sa.Index('ix_usage_records_endpoint', 'endpoint'),
         sa.Index('ix_usage_records_status', 'status'),
@@ -101,7 +85,6 @@ def upgrade() -> None:
         sa.Index('ix_usage_records_client_ip', 'client_ip')
     )
     
-    # === SPAM SAMPLES TABLE ===
     op.create_table(
         'spam_samples',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -109,22 +92,18 @@ def upgrade() -> None:
         sa.Column('is_spam', sa.Boolean(), nullable=False),
         sa.Column('confidence', sa.Float(), nullable=True, comment='Human labeling confidence 0.0-1.0'),
         
-        # Source information
         sa.Column('source', sa.String(50), nullable=False, comment='admin_report/auto_detected/manual_review'),
         sa.Column('language', sa.String(5), nullable=True, comment='ru/en/auto-detected'),
         sa.Column('reporter_id', sa.Integer(), nullable=True, comment='API key or admin ID'),
         
-        # Classification details
         sa.Column('spam_type', sa.String(50), nullable=True, comment='financial/promotional/phishing/other'),
         sa.Column('keywords', postgresql.ARRAY(sa.String(50)), nullable=True, comment='Extracted keywords'),
         sa.Column('features', postgresql.JSONB(), nullable=True, comment='Additional features for ML'),
         
-        # Timestamps
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('verified_at', sa.DateTime(timezone=True), nullable=True, comment='When sample was verified by human'),
         
-        # Constraints
         sa.PrimaryKeyConstraint('id'),
         sa.Index('ix_spam_samples_is_spam', 'is_spam'),
         sa.Index('ix_spam_samples_source', 'source'),
@@ -132,11 +111,9 @@ def upgrade() -> None:
         sa.Index('ix_spam_samples_created_at', 'created_at'),
         sa.Index('ix_spam_samples_spam_type', 'spam_type'),
         
-        # Full text search index
         sa.Index('ix_spam_samples_text_fts', 'text')
     )
     
-    # === RATE LIMIT CACHE TABLE ===
     op.create_table(
         'rate_limit_cache',
         sa.Column('id', sa.String(100), nullable=False, comment='Cache key: rate_limit:api_key_id:window'),
@@ -147,7 +124,6 @@ def upgrade() -> None:
         sa.Column('last_request_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
         
-        # Constraints
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['api_key_id'], ['api_keys.id'], ondelete='CASCADE'),
         sa.Index('ix_rate_limit_api_key', 'api_key_id'),
@@ -155,7 +131,6 @@ def upgrade() -> None:
         sa.Index('ix_rate_limit_window', 'window_type', 'window_start')
     )
     
-    # === ERROR LOG TABLE ===
     op.create_table(
         'error_logs',
         sa.Column('id', sa.BigInteger(), nullable=False),
@@ -163,25 +138,20 @@ def upgrade() -> None:
         sa.Column('severity', sa.Enum('low', 'medium', 'high', 'critical', name='error_severity'), nullable=False),
         sa.Column('category', sa.Enum('validation', 'authentication', 'authorization', 'rate_limit', 'external_service', 'database', 'cache', 'business_logic', 'system', 'unknown', name='error_category'), nullable=False),
         
-        # Error details
         sa.Column('error_type', sa.String(100), nullable=False, comment='Exception class name'),
         sa.Column('error_message', sa.Text(), nullable=False),
         sa.Column('stack_trace', sa.Text(), nullable=True),
         
-        # Context
         sa.Column('service_name', sa.String(50), nullable=False, default='antispam-api'),
         sa.Column('endpoint', sa.String(100), nullable=True),
         sa.Column('api_key_id', sa.Integer(), nullable=True),
         sa.Column('user_id', sa.String(100), nullable=True),
         sa.Column('request_id', sa.String(50), nullable=True),
         
-        # Additional data
         sa.Column('additional_data', postgresql.JSONB(), nullable=True),
         
-        # Timestamp
         sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         
-        # Constraints
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['api_key_id'], ['api_keys.id'], ondelete='SET NULL'),
         sa.Index('ix_error_logs_error_id', 'error_id'),
@@ -192,7 +162,6 @@ def upgrade() -> None:
         sa.Index('ix_error_logs_endpoint', 'endpoint')
     )
     
-    # === CIRCUIT BREAKER STATE TABLE ===
     op.create_table(
         'circuit_breaker_state',
         sa.Column('service_name', sa.String(50), nullable=False),
@@ -203,13 +172,11 @@ def upgrade() -> None:
         sa.Column('last_success_time', sa.DateTime(timezone=True), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         
-        # Constraints
         sa.PrimaryKeyConstraint('service_name'),
         sa.Index('ix_circuit_breaker_state', 'state'),
         sa.Index('ix_circuit_breaker_updated', 'updated_at')
     )
     
-    # === ANALYTICS AGGREGATES TABLE ===
     op.create_table(
         'analytics_aggregates',
         sa.Column('id', sa.BigInteger(), nullable=False),
@@ -218,30 +185,24 @@ def upgrade() -> None:
         sa.Column('period_start', sa.DateTime(timezone=True), nullable=False),
         sa.Column('period_end', sa.DateTime(timezone=True), nullable=False),
         
-        # Aggregated metrics
         sa.Column('total_requests', sa.Integer(), nullable=False, default=0),
         sa.Column('successful_requests', sa.Integer(), nullable=False, default=0),
         sa.Column('failed_requests', sa.Integer(), nullable=False, default=0),
         sa.Column('rate_limited_requests', sa.Integer(), nullable=False, default=0),
         
-        # Spam detection metrics
         sa.Column('spam_detected', sa.Integer(), nullable=False, default=0),
         sa.Column('clean_detected', sa.Integer(), nullable=False, default=0),
         sa.Column('avg_confidence', sa.Float(), nullable=True),
         
-        # Performance metrics
         sa.Column('avg_processing_time_ms', sa.Float(), nullable=True),
         sa.Column('max_processing_time_ms', sa.Float(), nullable=True),
         sa.Column('total_data_processed_bytes', sa.BigInteger(), nullable=False, default=0),
         
-        # Top endpoints (JSON array)
         sa.Column('top_endpoints', postgresql.JSONB(), nullable=True),
         
-        # Timestamps
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         
-        # Constraints
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['api_key_id'], ['api_keys.id'], ondelete='CASCADE'),
         sa.UniqueConstraint('api_key_id', 'period_type', 'period_start', name='uq_analytics_period'),
@@ -254,7 +215,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drop all production tables"""
     
-    # Drop tables in reverse order to respect foreign keys
     op.drop_table('analytics_aggregates')
     op.drop_table('circuit_breaker_state')
     op.drop_table('error_logs')
@@ -263,7 +223,6 @@ def downgrade() -> None:
     op.drop_table('api_usage_records')
     op.drop_table('api_keys')
     
-    # Drop enums
     op.execute('DROP TYPE IF EXISTS api_key_plan CASCADE')
     op.execute('DROP TYPE IF EXISTS api_key_status CASCADE')
     op.execute('DROP TYPE IF EXISTS request_status CASCADE')
@@ -271,12 +230,10 @@ def downgrade() -> None:
     op.execute('DROP TYPE IF EXISTS error_category CASCADE')
 
 
-# === HELPER FUNCTIONS ===
 
 def create_indexes_for_performance():
     """Create additional performance indexes"""
     
-    # Composite indexes for common queries
     op.create_index(
         'ix_usage_records_analytics',
         'api_usage_records',
@@ -292,7 +249,6 @@ def create_indexes_for_performance():
         comment='Optimized for rate limiting queries'
     )
     
-    # Partial indexes for active records
     op.create_index(
         'ix_api_keys_active',
         'api_keys',
@@ -305,7 +261,6 @@ def create_indexes_for_performance():
 def create_triggers():
     """Create database triggers for automatic maintenance"""
     
-    # Updated_at trigger function
     op.execute("""
         CREATE OR REPLACE FUNCTION update_updated_at_column()
         RETURNS TRIGGER AS $$
@@ -316,7 +271,6 @@ def create_triggers():
         $$ language 'plpgsql';
     """)
     
-    # Triggers for updated_at
     tables_with_updated_at = ['api_keys', 'spam_samples', 'analytics_aggregates']
     
     for table in tables_with_updated_at:
@@ -327,7 +281,6 @@ def create_triggers():
                 EXECUTE FUNCTION update_updated_at_column();
         """)
     
-    # Cleanup trigger for old usage records (keep only 3 months)
     op.execute("""
         CREATE OR REPLACE FUNCTION cleanup_old_usage_records()
         RETURNS void AS $$
@@ -342,7 +295,6 @@ def create_triggers():
 def create_views():
     """Create useful database views"""
     
-    # API Key usage summary view
     op.execute("""
         CREATE VIEW api_key_usage_summary AS
         SELECT 
@@ -363,7 +315,6 @@ def create_views():
         GROUP BY ak.id, ak.client_name, ak.plan, ak.status, ak.created_at, ak.last_used_at;
     """)
     
-    # Daily usage statistics view
     op.execute("""
         CREATE VIEW daily_usage_stats AS
         SELECT 
@@ -385,7 +336,6 @@ def create_views():
 def add_constraints_and_checks():
     """Add additional constraints and checks"""
     
-    # Check constraints for data validation
     op.create_check_constraint(
         'ck_api_keys_rate_limits_positive',
         'api_keys',
@@ -411,7 +361,6 @@ def add_constraints_and_checks():
     )
 
 
-# Execute additional setup after main tables
 def upgrade_with_optimizations():
     """Run upgrade with all optimizations"""
     upgrade()
@@ -420,13 +369,11 @@ def upgrade_with_optimizations():
     create_views()
     add_constraints_and_checks()
     
-    # Enable necessary PostgreSQL extensions
-    op.execute('CREATE EXTENSION IF NOT EXISTS pg_trgm;')  # For text search
-    op.execute('CREATE EXTENSION IF NOT EXISTS btree_gin;')  # For composite indexes
+    op.execute('CREATE EXTENSION IF NOT EXISTS pg_trgm;')
+    op.execute('CREATE EXTENSION IF NOT EXISTS btree_gin;')
 
 
 if __name__ == '__main__':
-    # For testing migrations
     print("Running production database migration...")
     upgrade_with_optimizations()
     print("Migration completed successfully!")

@@ -19,7 +19,6 @@ class AuthMiddleware(BaseMiddleware):
         """
         self.admin_user_ids = set(admin_user_ids or [])
 
-        # Команды, требующие админских прав
         self.admin_commands = {
             "/ban",
             "/unban",
@@ -33,7 +32,6 @@ class AuthMiddleware(BaseMiddleware):
             "/unmute",
         }
 
-        # Callback запросы, требующие админских прав
         self.admin_callbacks = {"ban_confirm", "ban_cancel", "unban", "spam_details"}
 
     async def __call__(
@@ -44,7 +42,6 @@ class AuthMiddleware(BaseMiddleware):
     ) -> Any:
         """Основной метод middleware"""
 
-        # Логируем все входящие события
         if isinstance(event, Message):
             text = event.text or "No text"
             user_id = event.from_user.id if event.from_user else "No user"
@@ -53,24 +50,20 @@ class AuthMiddleware(BaseMiddleware):
 
             if not await self._check_message_permissions(event):
                 logger.warning(f"[AUTH] Сообщение заблокировано middleware")
-                return  # Блокируем выполнение
+                return
 
-        # Проверяем права для callback запросов
         elif isinstance(event, CallbackQuery):
             if not await self._check_callback_permissions(event):
-                return  # Блокируем выполнение
+                return
 
-        # Добавляем информацию об авторизации в данные
         user_id = self._get_user_id(event)
         data["is_admin"] = user_id in self.admin_user_ids
         data["user_id"] = user_id
 
-        # Продолжаем обработку
         logger.debug(f"[AUTH] Передаем событие дальше в handlers")
 
         result = await handler(event, data)
         
-        # Логируем результат обработки
         if result is None:
             logger.debug(f"[AUTH] Handler завершен без возврата значения")
         else:
@@ -81,9 +74,8 @@ class AuthMiddleware(BaseMiddleware):
     async def _check_message_permissions(self, message: Message) -> bool:
         """Проверяет права для команд в сообщениях"""
         if not message.text or not message.text.startswith("/"):
-            return True  # Не команда - пропускаем
+            return True
 
-        # Убираем @bot_username из команды
         command = message.text.split()[0].lower().split('@')[0]
         user_id = message.from_user.id if message.from_user else None
         chat_type = message.chat.type if message.chat else "unknown"
@@ -91,26 +83,21 @@ class AuthMiddleware(BaseMiddleware):
 
         logger.info(f"[AUTH] Команда: {command}, user_id: {user_id}, chat_type: {chat_type}, chat_id: {chat_id}")
 
-        # В группах/супергруппах/каналах разрешена ТОЛЬКО команда /ban и только для админов
         if chat_type in ["group", "supergroup", "channel"]:
             if command != "/ban":
                 logger.info(f"[AUTH] Команда {command} запрещена в группах/каналах. Игнорируем.")
-                return False  # Молча игнорируем
+                return False
 
-            # Для /ban проверяем админские права
             logger.info(f"[AUTH] Команда /ban в группе/канале от {user_id}")
 
-        # Если это админская команда
         if command in self.admin_commands:
             logger.info(f"[AUTH] Админская команда {command} от пользователя {user_id}")
             logger.info(f"[AUTH] Список админов: {list(self.admin_user_ids)}")
 
-            # Проверяем, является ли пользователь глобальным администратором
             if user_id in self.admin_user_ids:
                 logger.info(f"[AUTH] Пользователь {user_id} - глобальный админ, разрешаем")
                 return True
 
-            # Дополнительно проверяем права в чате
             if message.chat.type in ["group", "supergroup", "channel"]:
                 try:
                     logger.info(f"[AUTH] Проверяем права пользователя {user_id} в чате {chat_id}")
@@ -125,7 +112,6 @@ class AuthMiddleware(BaseMiddleware):
                 except Exception as e:
                     logger.error(f"[AUTH] Ошибка проверки прав в чате: {e}")
 
-            # Доступ запрещен
             logger.warning(f"[AUTH] Доступ запрещен для пользователя {user_id}")
             await message.reply(
                 "❌ У вас нет прав для выполнения этой команды.\n"
@@ -141,15 +127,12 @@ class AuthMiddleware(BaseMiddleware):
         if not callback.data:
             return True
 
-        # Извлекаем тип callback из данных
         callback_type = callback.data.split(":")[0]
 
-        # Если это админский callback
         if callback_type in self.admin_callbacks:
             user_id = callback.from_user.id if callback.from_user else None
 
             if user_id not in self.admin_user_ids:
-                # Дополнительно проверяем права в чате
                 if callback.message and callback.message.chat.type == "group":
                     try:
                         chat_member = await callback.bot.get_chat_member(

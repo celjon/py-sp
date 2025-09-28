@@ -7,20 +7,16 @@ from typing import List, Optional, Dict, Any
 class DetectionReason(Enum):
     """Причины детекции спама - только современная архитектура"""
 
-    # CAS детектор
-    CAS_BANNED = "cas_banned"  # Забанен в CAS базе
+    CAS_BANNED = "CAS"
 
-    # RUSpam BERT детектор
-    CLASSIFIER = "classifier"  # RUSpam BERT классификатор
-    RUSPAM_DETECTED = "ruspam_detected"  # RUSpam обнаружил спам
-    RUSPAM_CLEAN = "ruspam_clean"  # RUSpam определил как чистое
+    CLASSIFIER = "classifier"
+    RUSPAM_DETECTED = "ML"
+    RUSPAM_CLEAN = "ruspam_clean"
 
-    # BotHub LLM детектор
-    BOTHUB_DETECTED = "bothub_detected"  # Обнаружено BotHub
-    BOTHUB_CLEAN = "bothub_clean"  # BotHub определил как чистое
+    BOTHUB_DETECTED = "BotHub"
+    BOTHUB_CLEAN = "bothub_clean"
 
-    # Административные действия
-    ADMIN_REPORTED = "admin_reported"  # Помечено админом
+    ADMIN_REPORTED = "admin_reported"
 
 
 @dataclass
@@ -34,7 +30,7 @@ class DetectorResult:
     processing_time_ms: float = 0.0
     error: Optional[str] = None
     token_usage: Optional[Dict[str, int]] = (
-        None  # Для BotHub: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        None
     )
 
 
@@ -49,13 +45,11 @@ class DetectionResult:
     primary_reason: DetectionReason
     detector_results: List[DetectorResult] = field(default_factory=list)
 
-    # Рекомендуемые действия
     should_delete: bool = False
     should_ban: bool = False
     should_restrict: bool = False
     should_warn: bool = False
 
-    # Дополнительная информация
     processing_time_ms: float = 0.0
     created_at: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -86,7 +80,6 @@ class DetectionResult:
         """Добавляет результат детектора"""
         self.detector_results.append(result)
 
-        # Обновляем общую уверенность (взвешенное среднее)
         if result.is_spam and result.confidence > self.overall_confidence:
             self.overall_confidence = result.confidence
 
@@ -95,18 +88,14 @@ class DetectionResult:
         if not self.is_spam:
             return
 
-        # Высокая уверенность - бан
         if self.overall_confidence >= 0.9:
             self.should_ban = True
             self.should_delete = True
-        # Средняя уверенность - ограничение
         elif self.overall_confidence >= spam_threshold:
             self.should_restrict = True
             self.should_delete = True
-        # Низкая уверенность - предупреждение
         else:
             self.should_warn = True
-            # Для предупреждений удаление не обязательно
             self.should_delete = self.overall_confidence > 0.5
 
     def to_summary(self) -> str:

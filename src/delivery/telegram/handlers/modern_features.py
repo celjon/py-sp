@@ -26,15 +26,12 @@ async def handle_chat_member_updated(event: types.ChatMemberUpdated, **kwargs):
         old_member = event.old_chat_member
         new_member = event.new_chat_member
 
-        # Отслеживаем новых участников
         if old_member.status == "left" and new_member.status == "member":
             await _handle_new_member_join(event, deps)
 
-        # Отслеживаем когда пользователей банят/разбанивают
         elif old_member.status == "member" and new_member.status == "kicked":
             await _handle_member_banned(event, deps)
 
-        # Отслеживаем выдачу админских прав
         elif (old_member.status in ["member", "restricted"] and
               new_member.status == "administrator"):
             await _handle_admin_promotion(event, deps)
@@ -50,7 +47,6 @@ async def _handle_new_member_join(event: types.ChatMemberUpdated, deps: Dict[str
 
     logger.info(f"New member joined: {user.full_name} ({user.id}) to {chat.title}")
 
-    # Проверяем через CAS если доступно
     cas_gateway = deps.get("cas_gateway")
     if cas_gateway:
         try:
@@ -58,14 +54,12 @@ async def _handle_new_member_join(event: types.ChatMemberUpdated, deps: Dict[str
             if is_banned.get("is_banned"):
                 logger.warning(f"CAS banned user detected: {user.id}")
 
-                # Автоматически баним
                 await event.bot.ban_chat_member(
                     chat_id=chat.id,
                     user_id=user.id,
                     revoke_messages=True
                 )
 
-                # Уведомляем админов
                 admin_chat_id = deps.get("admin_chat_id")
                 if admin_chat_id:
                     notification = (
@@ -86,7 +80,6 @@ async def _handle_member_banned(event: types.ChatMemberUpdated, deps: Dict[str, 
     user = event.new_chat_member.user
     chat = event.chat
 
-    # Сохраняем в базу данных если доступно
     user_repo = deps.get("user_repository")
     if user_repo:
         try:
@@ -109,7 +102,6 @@ async def _handle_admin_promotion(event: types.ChatMemberUpdated, deps: Dict[str
 
     logger.info(f"User {user.full_name} ({user.id}) promoted to admin in {chat.title}")
 
-    # Уведомляем о новом админе
     admin_chat_id = deps.get("admin_chat_id")
     if admin_chat_id:
         notification = (
@@ -132,7 +124,6 @@ async def cmd_chat_info(message: types.Message, **kwargs):
     Использует современные поля Telegram API
     """
     try:
-        # Получаем полную информацию о чате
         chat = await message.bot.get_chat(message.chat.id)
 
         info_text = f"📊 <b>Информация о чате</b>\n\n"
@@ -140,14 +131,12 @@ async def cmd_chat_info(message: types.Message, **kwargs):
         info_text += f"🆔 ID: <code>{chat.id}</code>\n"
         info_text += f"👥 Тип: {chat.type}\n"
 
-        # Количество участников
         try:
             member_count = await message.bot.get_chat_member_count(message.chat.id)
             info_text += f"👤 Участников: {member_count}\n"
         except Exception:
             pass
 
-        # Современные поля антиспам защиты
         if hasattr(chat, 'has_aggressive_anti_spam_enabled'):
             antispam_status = "✅ Включена" if chat.has_aggressive_anti_spam_enabled else "❌ Отключена"
             info_text += f"🛡️ Агрессивная антиспам защита: {antispam_status}\n"
@@ -160,7 +149,6 @@ async def cmd_chat_info(message: types.Message, **kwargs):
             protected_status = "✅ Да" if chat.has_protected_content else "❌ Нет"
             info_text += f"🔒 Защищенный контент: {protected_status}\n"
 
-        # Описание чата
         if chat.description:
             info_text += f"\n📄 Описание:\n{chat.description[:200]}{'...' if len(chat.description) > 200 else ''}\n"
 
@@ -179,7 +167,6 @@ async def cmd_user_info(message: types.Message, **kwargs):
     """
     deps: Dict[str, Any] = kwargs.get("deps", {})
 
-    # Определяем целевого пользователя
     target_user = None
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
@@ -188,7 +175,6 @@ async def cmd_user_info(message: types.Message, **kwargs):
         if args:
             try:
                 user_id = int(args[0])
-                # В реальном проекте здесь нужна проверка через get_chat_member
                 target_user = types.User(id=user_id, is_bot=False, first_name="Unknown")
             except ValueError:
                 await message.reply("❌ Неверный формат ID пользователя")
@@ -210,7 +196,6 @@ async def cmd_user_info(message: types.Message, **kwargs):
 
         info_text += f"🤖 Бот: {'Да' if target_user.is_bot else 'Нет'}\n"
 
-        # Проверка через CAS
         cas_gateway = deps.get("cas_gateway")
         if cas_gateway:
             try:
@@ -220,7 +205,6 @@ async def cmd_user_info(message: types.Message, **kwargs):
             except Exception as e:
                 info_text += f"🛡️ CAS: ❌ Ошибка проверки\n"
 
-        # Проверка в локальной базе
         user_repo = deps.get("user_repository")
         if user_repo:
             try:
@@ -228,15 +212,13 @@ async def cmd_user_info(message: types.Message, **kwargs):
                 local_status = "🔴 Забанен" if is_banned else "🟢 Активен"
                 info_text += f"📋 Локальная БД: {local_status}\n"
 
-                # Проверяем белый список
-                is_approved = await user_repo.is_user_approved(target_user.id)
+                is_approved = await user_repo.is_user_approved(target_user.id, message.chat.id)
                 approved_status = "⭐ В белом списке" if is_approved else "➖ Обычный"
                 info_text += f"📋 Статус: {approved_status}\n"
 
             except Exception as e:
                 info_text += f"📋 Локальная БД: ❌ Ошибка проверки\n"
 
-        # Статус в чате
         try:
             chat_member = await message.bot.get_chat_member(message.chat.id, target_user.id)
             status_map = {
@@ -266,7 +248,6 @@ async def cmd_cas_check(message: types.Message, **kwargs):
     """
     deps: Dict[str, Any] = kwargs.get("deps", {})
 
-    # Определяем целевого пользователя
     target_user = None
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
@@ -292,7 +273,6 @@ async def cmd_cas_check(message: types.Message, **kwargs):
         return
 
     try:
-        # Проверяем через CAS
         cas_result = await cas_gateway.check_user(target_user.id, {})
 
         result_text = f"🛡️ <b>CAS проверка</b>\n\n"
