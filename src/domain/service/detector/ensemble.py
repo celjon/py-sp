@@ -257,7 +257,6 @@ class EnsembleDetector:
             ruspam_result = await self._check_ruspam(text, detected_language)
             if ruspam_result:
                 results.append(ruspam_result)
-                # Обновляем общую уверенность
                 overall_confidence = max(overall_confidence, ruspam_result.confidence)
                 if ruspam_result.is_spam:
                     is_spam_detected = True
@@ -298,15 +297,12 @@ class EnsembleDetector:
                     bothub_result = await self._check_bothub(message, user_context, text, ruspam_confidence)
                     if bothub_result:
                         results.append(bothub_result)
-                        # Для BotHub используем исходную уверенность из gateway для логирования
-                        # Получаем raw confidence из деталей BotHub ответа
                         try:
                             import json
                             details_dict = json.loads(bothub_result.details) if bothub_result.details else {}
                             bothub_raw_confidence = details_dict.get("raw_confidence",
                                 bothub_result.confidence if bothub_result.is_spam else (1.0 - bothub_result.confidence))
                         except (json.JSONDecodeError, ValueError):
-                            # Fallback: исходная уверенность BotHub до нормализации
                             bothub_raw_confidence = bothub_result.confidence if bothub_result.is_spam else (1.0 - bothub_result.confidence)
                         overall_confidence = max(overall_confidence, bothub_raw_confidence)
                         if bothub_result.is_spam:
@@ -323,7 +319,7 @@ class EnsembleDetector:
                 results,
                 is_spam_detected,
                 primary_reason,
-                overall_confidence,  # Используем общую уверенность для логирования
+                overall_confidence,
                 start_time,
                 notes,
             )
