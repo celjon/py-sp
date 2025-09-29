@@ -76,6 +76,7 @@ class CheckMessageUseCase:
             system_prompt = user.system_prompt
 
         user_context = {
+            "user_id": user.telegram_id,
             "message_count": user.message_count,
             "spam_score": user.spam_score,
             "is_new_user": (

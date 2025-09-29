@@ -439,6 +439,10 @@ class EnsembleDetector:
 
     def clear_bothub_cache_for_user(self, user_id: int):
         """Очистить кэш BotHub детекторов для конкретного пользователя"""
+        if user_id is None:
+            logger.warning("[CACHE] Cannot clear cache for user_id=None")
+            return
+            
         keys_to_remove = []
         for cache_key in self._bothub_detectors_cache.keys():
             if f"user_{user_id}_" in cache_key:
@@ -447,13 +451,26 @@ class EnsembleDetector:
         for key in keys_to_remove:
             del self._bothub_detectors_cache[key]
             logger.info(f"[CACHE] Cleared BotHub cache for user {user_id}: {key}")
+            
+        if not keys_to_remove:
+            logger.debug(f"[CACHE] No cache entries found for user {user_id}")
 
     def _get_or_create_bothub_detector(self, user_id: int, user_token: str, user_instructions: str = None, user_model: str = None):
         """Получить или создать BotHub детектор из кэша"""
         import time
         from ....adapter.gateway.bothub_gateway import BotHubGateway
 
+        if user_id is None:
+            logger.warning("[CACHE] user_id is None, cannot use cache")
+            user_bothub_gateway = BotHubGateway(
+                user_token=user_token,
+                user_instructions=user_instructions,
+                user_model=user_model
+            )
+            return BotHubDetector(user_bothub_gateway)
+
         cache_key = f"user_{user_id}_{user_token[:10]}:{user_instructions or 'default'}:{user_model or 'default'}"
+        logger.debug(f"[CACHE] Cache key: {cache_key}")
 
         current_time = time.time()
 
@@ -465,10 +482,12 @@ class EnsembleDetector:
                 return detector
             else:
                 del self._bothub_detectors_cache[cache_key]
-
+                logger.debug(f"[CACHE] Expired cache entry removed for user {user_id}")
         self.clear_bothub_cache_for_user(user_id)
 
         logger.info(f"[CACHE] Creating new BotHub detector for user {user_id}")
+        logger.info(f"[CACHE] Model: {user_model or 'default'}, Instructions: {user_instructions[:50] + '...' if user_instructions and len(user_instructions) > 50 else user_instructions or 'default'}")
+        
         user_bothub_gateway = BotHubGateway(
             user_token=user_token,
             user_instructions=user_instructions,
@@ -477,6 +496,7 @@ class EnsembleDetector:
         user_bothub_detector = BotHubDetector(user_bothub_gateway)
 
         self._bothub_detectors_cache[cache_key] = (user_bothub_detector, current_time)
+        logger.debug(f"[CACHE] Stored new detector with key: {cache_key}")
 
         keys_to_remove = []
         for key, (_, last_used) in self._bothub_detectors_cache.items():
@@ -513,11 +533,16 @@ class EnsembleDetector:
 
         try:
             user_id = user_context.get("user_id") if user_context else message.user_id
+            user_model = user_context.get("user_bothub_model") if user_context else None
+            user_instructions = user_context.get("user_system_prompt") if user_context else None
+            
+            logger.debug(f"[BOTHUB] User ID: {user_id}, Model: {user_model}, Has instructions: {bool(user_instructions)}")
+            
             user_bothub_detector = self._get_or_create_bothub_detector(
                 user_id,
                 user_bothub_token,
-                user_context.get("user_system_prompt"),
-                user_context.get("user_bothub_model")
+                user_instructions,
+                user_model
             )
 
             start_bothub = time.time()
