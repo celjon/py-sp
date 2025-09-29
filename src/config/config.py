@@ -26,8 +26,6 @@ class TelegramConfig:
     token: str
     admin_chat_id: int
     admin_users: List[int]
-    webhook_url: Optional[str] = None
-    ngrok_url: Optional[str] = None
 
 
 @dataclass
@@ -166,8 +164,6 @@ def load_config(env: Optional[str] = None) -> Config:
         token=telegram_data["token"],
         admin_chat_id=admin_chat_id,
         admin_users=admin_users,
-        webhook_url=telegram_data.get("webhook_url"),
-        ngrok_url=telegram_data.get("ngrok_url"),
     )
 
     spam_detection_config = SpamDetectionConfig(
@@ -247,8 +243,6 @@ def _create_default_config() -> Config:
             token=os.getenv("BOT_TOKEN", ""),
             admin_chat_id=int(os.getenv("ADMIN_CHAT_ID", "0")),
             admin_users=_parse_admin_users(os.getenv("ADMIN_USERS", "")),
-            webhook_url=os.getenv("WEBHOOK_URL"),
-            ngrok_url=os.getenv("NGROK_URL"),
         ),
         spam_detection=SpamDetectionConfig(
             ensemble={

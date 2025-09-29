@@ -1,53 +1,47 @@
-# config/development.yaml - Современная архитектура (БЕЗ эвристик и ML)
 database:
-  url: "postgresql://antispam:password@localhost:5432/antispam_bot"
-  pool_size: 10
+  url: "${DATABASE_URL}"
+  pool_size: 20
 
 redis:
-  url: "redis://redis:6379/0"
+  url: "${REDIS_URL}"
 
 telegram:
   token: "${BOT_TOKEN}"
   admin_chat_id: "${ADMIN_CHAT_ID}"
   admin_users: ${ADMIN_USERS}
-  webhook_url: "${WEBHOOK_URL}"
-  ngrok_url: "${NGROK_URL}"
 
-# Современная детекция спама (БЕЗ устаревших heuristic и ml)
+# Современная детекция спама
 spam_detection:
   ensemble:
-    spam_threshold: 0.6
-    high_confidence_threshold: 0.8
-    auto_ban_threshold: 0.85
-    max_processing_time: 2.0
+    spam_threshold: 0.7
+    high_confidence_threshold: 0.85
+    auto_ban_threshold: 0.9
+    max_processing_time: 1.5
     enable_early_exit: true
     
     # RUSpam настройки
     use_ruspam: true
-    ruspam_min_length: 10
-    russian_threshold: 0.3
+    ruspam_min_length: 15
+    russian_threshold: 0.4
     
-    # BotHub настройки (заменяет OpenRouter)
-    bothub_min_length: 5
+    # BotHub настройки
+    bothub_min_length: 10
     use_bothub_fallback: true
     bothub_timeout: 60.0
-    bothub_min_ruspam_confidence: 0.2  # Минимальная уверенность RUSpam для вызова BotHub
+    bothub_min_ruspam_confidence: 0.2
 
-# RUSpam BERT модель
+# RUSpam production
 ruspam:
   model_name: "RUSpam/spamNS_v1"
-  min_confidence: 0.6
+  min_confidence: 0.7
   cache_results: true
-  cache_ttl: 300  # 5 минут
+  cache_ttl: 1800
 
-# OpenAI и OpenRouter полностью удалены - используем только BotHub
 
-# BotHub LLM (новый провайдер)
 bothub:
-  model: "gpt-4o-mini"  # Более стабильная модель
+  model: "gpt-5-nano"
   max_tokens: 1000
   temperature: 0.0
-  # Дополнительные настройки
   timeout: 60.0
   max_retries: 2
   retry_delay: 1.0
@@ -66,23 +60,23 @@ moderation:
   auto_restrict_threshold: 0.70
   delete_recent_messages: true
   recent_messages_hours: 1
-  aggressive_cleanup: false
+  aggressive_cleanup: true
 
 # Логирование
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "logs/antispam-bot-dev.log"
-  structured: false
+  structured: true
 
 # HTTP Server
 http_server:
   enabled: true
   host: "0.0.0.0"
   port: 8080
-  workers: 2
-  cors_enabled: true
-  cors_origins: ["http://localhost:3000", "http://127.0.0.1:3000"]
+  workers: 4
+  cors_enabled: false
+  cors_origins: []
 
 # API настройки
 api:
@@ -100,7 +94,6 @@ api:
   features:
     batch_detection: true
     usage_analytics: true
-    webhook_support: false
 
 # Метрики и мониторинг
 metrics:
@@ -110,10 +103,10 @@ metrics:
 
 # Производительность
 performance:
-  max_concurrent_checks: 10
-  detection_timeout: 2.0
+  max_concurrent_checks: 20
+  detection_timeout: 6
   cache_detection_results: 300
-  rate_limit_per_user: 30
+  rate_limit_per_user: 10
 
 # Биллинг OpenRouter
 openrouter_billing:

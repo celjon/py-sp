@@ -1,4 +1,3 @@
-# config/production.yaml - Production конфигурация (БЕЗ эвристик и ML)
 database:
   url: "${DATABASE_URL}"
   pool_size: 20
@@ -11,117 +10,114 @@ telegram:
   admin_chat_id: "${ADMIN_CHAT_ID}"
   admin_users: ${ADMIN_USERS}
 
-# Строгие настройки для production (БЕЗ устаревших heuristic и ml)
+# Строгие настройки для production
 spam_detection:
   ensemble:
-    spam_threshold: 0.7          # Выше порог для production
+    spam_threshold: 0.7
     high_confidence_threshold: 0.85
-    auto_ban_threshold: 0.9      # Очень высокий порог автобана
-    max_processing_time: 1.5     # Быстрее обработка
+    auto_ban_threshold: 0.9
+    max_processing_time: 1.5
     enable_early_exit: true
     
     # RUSpam настройки
     use_ruspam: true
-    ruspam_min_length: 15        # Длиннее тексты для анализа
-    russian_threshold: 0.4       # Строже определение русского
+    ruspam_min_length: 15
+    russian_threshold: 0.4
     
-    # BotHub настройки (заменяет OpenRouter)
-    bothub_min_length: 10        # Длиннее тексты для LLM
+    # BotHub настройки
+    bothub_min_length: 10
     use_bothub_fallback: true
-    bothub_timeout: 60.0          # Меньше таймаут
-    bothub_min_ruspam_confidence: 0.2  # Минимальная уверенность RUSpam для вызова BotHub
+    bothub_timeout: 60.0
+    bothub_min_ruspam_confidence: 0.2
 
 # RUSpam production
 ruspam:
   model_name: "RUSpam/spamNS_v1"
-  min_confidence: 0.7            # Выше минимальная уверенность
+  min_confidence: 0.7
   cache_results: true
-  cache_ttl: 1800               # 30 минут
+  cache_ttl: 1800
 
-# OpenAI и OpenRouter полностью удалены - используем только BotHub
 
-# BotHub production (новый провайдер)
+# BotHub
 bothub:
-  model: "gpt-5-nano"  # Модель по умолчанию
+  model: "gpt-5-nano"
   max_tokens: 300
   temperature: 0.0
-  # Дополнительные настройки
   timeout: 60.0
   max_retries: 1
   retry_delay: 1.0
 
-# Внешние API production
+# Внешние API
 external_apis:
   cas:
     api_url: "https://api.cas.chat/check"
-    timeout: 3                  # Быстрее таймаут
-    cache_ttl: 7200            # 2 часа кэш
-    retry_attempts: 1          # Меньше попыток
+    timeout: 3
+    cache_ttl: 7200
+    retry_attempts: 1
 
 # Строгая модерация
 moderation:
-  auto_ban_threshold: 0.95      # Очень высокий порог
+  auto_ban_threshold: 0.95
   auto_restrict_threshold: 0.8
   delete_recent_messages: true
-  recent_messages_hours: 2      # Удаляем за 2 часа
+  recent_messages_hours: 2
   aggressive_cleanup: true
 
 # Production логирование
 logging:
-  level: "WARNING"             # Только важные сообщения
+  level: "WARNING"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "logs/antispam-bot-prod.log"
-  structured: true            # Структурированные логи
+  structured: true
 
 # HTTP Server production
 http_server:
   enabled: true
   host: "0.0.0.0"
   port: 8080
-  workers: 4                  # Больше воркеров
-  cors_enabled: false         # Отключаем CORS в production
+  workers: 4
+  cors_enabled: false
   cors_origins: []
 
 # API production
 api:
   rate_limit:
-    default_requests_per_minute: 30  # Строже лимиты
+    default_requests_per_minute: 30
     default_requests_per_day: 2000
     burst_limit: 5
   
   auth:
     jwt_secret: "${JWT_SECRET}"
     jwt_algorithm: "HS256"
-    access_token_expire_minutes: 15   # Короче сессии
+    access_token_expire_minutes: 15
     refresh_token_expire_days: 3
   
   features:
     batch_detection: true
     usage_analytics: true
-    webhook_support: true            # Включаем webhook в production
 
 # Метрики production
 metrics:
   enabled: true
   prometheus_port: 9090
-  collect_detailed: false      # Меньше детальных метрик
+  collect_detailed: false
 
 # Производительность production
 performance:
-  max_concurrent_checks: 20    # Больше конкурентных проверок
-  detection_timeout: 1.5       # Быстрее таймаут
-  cache_detection_results: 600 # 10 минут кэш
-  rate_limit_per_user: 10      # Строже лимиты пользователей
+  max_concurrent_checks: 20
+  detection_timeout: 1.5
+  cache_detection_results: 600
+  rate_limit_per_user: 10
 
-# Биллинг OpenRouter (production)
+# Биллинг OpenRouter
 openrouter_billing:
-  retention_days: 365          # Храним данные год
+  retention_days: 365
   enable_redis_cache: true
 
-# Production безопасность
+# Безопасность
 security:
   enable_ip_whitelist: true
   allowed_ips: ["${ALLOWED_IPS}"]
   enable_request_signing: true
-  max_request_size: 1048576    # 1MB
+  max_request_size: 1048576
   enable_ddos_protection: true
