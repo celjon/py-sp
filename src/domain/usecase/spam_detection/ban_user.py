@@ -100,7 +100,6 @@ class BanUserUseCase:
                         username=username
                     )
 
-                    # Удаляем пользователя из белого списка при бане
                     await self.user_repo.remove_from_approved(user_id, chat_id)
                 else:
                     result["error"] = "Failed to ban user via Telegram API"

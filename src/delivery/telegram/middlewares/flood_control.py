@@ -20,9 +20,9 @@ class FloodControlMiddleware(BaseMiddleware):
 
     def __init__(
         self,
-        max_messages: int = 5,
-        time_window: int = 5,  # секунд
-        mute_duration: int = 30,  # секунд мута
+        max_messages: int = 3,
+        time_window: int = 3,
+        mute_duration: int = 30,
         enabled: bool = True
     ):
         """
@@ -36,11 +36,7 @@ class FloodControlMiddleware(BaseMiddleware):
         self.time_window = time_window
         self.mute_duration = mute_duration
         self.enabled = enabled
-
-        # Хранилище: user_id -> список timestamp'ов сообщений
         self.user_messages: Dict[int, List[float]] = {}
-
-        # Мутированные пользователи: user_id -> timestamp окончания мута
         self.muted_users: Dict[int, float] = {}
 
         logger.info(f"🛡️ FloodControl: {max_messages} сообщений/{time_window}сек = мут {mute_duration}сек")
@@ -56,7 +52,6 @@ class FloodControlMiddleware(BaseMiddleware):
         if not self.enabled or not isinstance(event, Message):
             return await handler(event, data)
 
-        # Только для групп/супергрупп (не для приватных чатов)
         if event.chat.type not in ['group', 'supergroup']:
             return await handler(event, data)
 
@@ -66,26 +61,21 @@ class FloodControlMiddleware(BaseMiddleware):
 
         current_time = time.time()
 
-        # Очищаем истекшие муты
         self._cleanup_expired_mutes(current_time)
 
-        # Проверяем активный мут
         if self._is_user_muted(user_id, current_time):
             logger.debug(f"[FLOOD] Пользователь {user_id} в муте, сообщение игнорируется")
-            # Удаляем сообщение от мутированного пользователя
             try:
                 await event.delete()
             except Exception:
                 pass
-            return  # Не передаем дальше
+            return
 
-        # Обновляем историю сообщений пользователя
         self._update_user_messages(user_id, current_time)
 
-        # Проверяем флуд
         if self._check_flood(user_id, current_time):
             await self._handle_flood(event, user_id, current_time, data)
-            return  # Не передаем дальше
+            return
 
         return await handler(event, data)
 
@@ -108,23 +98,20 @@ class FloodControlMiddleware(BaseMiddleware):
         if user_id not in self.user_messages:
             self.user_messages[user_id] = []
 
-        # Добавляем текущее сообщение
         self.user_messages[user_id].append(current_time)
 
-        # Удаляем старые сообщения (вне окна времени)
         cutoff_time = current_time - self.time_window
         self.user_messages[user_id] = [
             msg_time for msg_time in self.user_messages[user_id]
             if msg_time > cutoff_time
         ]
 
-        # Очищаем память от неактивных пользователей
         if len(self.user_messages) > 1000:
             self._cleanup_old_users(current_time)
 
     def _cleanup_old_users(self, current_time: float) -> None:
         """Очищает данные неактивных пользователей"""
-        cutoff_time = current_time - 3600  # 1 час
+        cutoff_time = current_time - 3600
         users_to_remove = []
 
         for user_id, messages in self.user_messages.items():
@@ -143,46 +130,48 @@ class FloodControlMiddleware(BaseMiddleware):
         """Обрабатывает обнаруженный флуд"""
         logger.warning(f"🚨 [FLOOD] Флуд от пользователя {user_id}: {len(self.user_messages[user_id])} сообщений за {self.time_window}сек")
 
-        # Мутим пользователя
         mute_end_time = current_time + self.mute_duration
         self.muted_users[user_id] = mute_end_time
 
-        # Пытаемся наложить мут через Telegram API
         telegram_gateway = data.get('telegram_gateway')
+        mute_success = False
         if telegram_gateway:
             mute_until = datetime.now() + timedelta(seconds=self.mute_duration)
-            success = await telegram_gateway.restrict_user(
+            mute_success = await telegram_gateway.restrict_user(
                 chat_id=message.chat.id,
                 user_id=user_id,
                 until_date=mute_until
             )
 
-            if success:
+            if mute_success:
                 logger.info(f"✅ [FLOOD] Пользователь {user_id} замучен на {self.mute_duration}сек через Telegram API")
             else:
                 logger.warning(f"⚠️ [FLOOD] Не удалось замутить {user_id} через API (недостаточно прав)")
 
-        # Удаляем текущее сообщение
+        deleted_count = 0
         try:
             await message.delete()
+            deleted_count += 1
             logger.debug(f"🗑️ [FLOOD] Удалено флуд-сообщение от {user_id}")
         except Exception as e:
             logger.warning(f"⚠️ [FLOOD] Не удалось удалить сообщение: {e}")
 
-        # Удаляем последние сообщения пользователя (ретроактивная очистка)
-        await self._delete_recent_flood_messages(message, user_id, data)
+        additional_deleted = await self._delete_recent_flood_messages(message, user_id, data)
+        deleted_count += additional_deleted
 
-    async def _delete_recent_flood_messages(self, current_message: Message, user_id: int, data: Dict[str, Any]) -> None:
-        """Удаляет последние сообщения флудера"""
+        await self._send_flood_notification(message, user_id, deleted_count, mute_success, data)
+
+    async def _delete_recent_flood_messages(self, current_message: Message, user_id: int, data: Dict[str, Any]) -> int:
+        """Удаляет последние сообщения флудера, возвращает количество удаленных"""
         try:
-            # Пытаемся удалить несколько последних сообщений
-            # (это приблизительно, так как мы не храним message_id)
             chat_id = current_message.chat.id
             current_msg_id = current_message.message_id
 
-            # Пытаемся удалить 3-5 последних сообщений
+            flood_messages_count = len(self.user_messages.get(user_id, [])) - 1
+            messages_to_delete = min(flood_messages_count, self.max_messages)
+
             deleted_count = 0
-            for offset in range(1, 6):  # от -1 до -5 сообщений назад
+            for offset in range(1, messages_to_delete + 1):
                 try:
                     await current_message.bot.delete_message(
                         chat_id=chat_id,
@@ -190,20 +179,61 @@ class FloodControlMiddleware(BaseMiddleware):
                     )
                     deleted_count += 1
                 except Exception:
-                    break  # Если не можем удалить, останавливаемся
+                    break
 
             if deleted_count > 0:
                 logger.info(f"🧹 [FLOOD] Удалено {deleted_count} последних сообщений от флудера {user_id}")
 
+            return deleted_count
+
         except Exception as e:
             logger.debug(f"[FLOOD] Ретроактивная очистка не удалась: {e}")
+            return 0
+
+    async def _send_flood_notification(self, message: Message, user_id: int, deleted_count: int, mute_success: bool, data: Dict[str, Any]) -> None:
+        """Отправляет уведомление владельцу чата о флуде"""
+        try:
+            chat_repository = data.get('chat_repository')
+            if not chat_repository:
+                return
+
+            chat = await chat_repository.get_chat_by_telegram_id(message.chat.id)
+            if not chat or not chat.owner_user_id or not chat.ban_notifications_enabled:
+                return
+
+            user_name = message.from_user.full_name if message.from_user else f"ID {user_id}"
+            username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else ""
+
+            mute_status = "✅ Мут наложен" if mute_success else "❌ Мут не удался"
+
+            notification_text = (
+                f"🚨 <b>Пользователь замучен за флуд</b>\n\n"
+                f"💬 <b>Группа:</b> {chat.display_name}\n"
+                f"👤 <b>Пользователь:</b> {user_name} {username}\n"
+                f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+                f"📊 <b>Флуд:</b> {len(self.user_messages[user_id])} сообщений за {self.time_window} сек\n"
+                f"🔇 <b>Мут:</b> {mute_status} на {self.mute_duration} сек\n"
+                f"🗑️ <b>Удалено сообщений:</b> {deleted_count}\n\n"
+                f"⏰ {time.strftime('%H:%M:%S %d.%m.%Y')}"
+            )
+
+            await message.bot.send_message(
+                chat_id=chat.owner_user_id,
+                text=notification_text,
+                parse_mode="HTML"
+            )
+
+            logger.info(f"📬 [FLOOD] Уведомление о флуде отправлено владельцу {chat.owner_user_id}")
+
+        except Exception as e:
+            logger.error(f"❌ [FLOOD] Ошибка отправки уведомления: {e}")
 
     def get_stats(self) -> Dict[str, Any]:
         """Получить статистику flood control"""
         current_time = time.time()
         active_users = len([
             user_id for user_id, messages in self.user_messages.items()
-            if messages and max(messages) > current_time - 60  # активны за последнюю минуту
+            if messages and max(messages) > current_time - 60
         ])
 
         active_mutes = len([

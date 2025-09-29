@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: antispam
       POSTGRES_USER: antispam
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_PASSWORD: password  # Базовый пароль для инициализации
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d

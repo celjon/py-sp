@@ -381,7 +381,6 @@ async def handle_unban_callback(callback_query: types.CallbackQuery, callback_da
             telegram_unban = "✅ Разбанен в Telegram"
             logger.info(f"[UNBAN] Successfully unbanned user {callback_data.user_id} from chat {callback_data.chat_id}")
         except Exception as e:
-            # Игнорируем ошибки если пользователь уже не забанен или не был в чате
             if "user not found" in str(e).lower() or "not restricted" in str(e).lower() or "bad request" in str(e).lower():
                 telegram_unban = "✅ Пользователь не был забанен"
                 logger.info(f"[UNBAN] User {callback_data.user_id} was not banned in chat {callback_data.chat_id}")

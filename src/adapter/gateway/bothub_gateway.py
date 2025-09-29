@@ -174,11 +174,9 @@ User context:
             content = response.choices[0].message.content
             logger.info(f"[BOTHUB] Raw API response: {repr(content)}")
 
-            # Проверяем на пустой content
             if not content or content.strip() == "":
                 logger.error(f"[BOTHUB] Empty response despite completion_tokens={response.usage.completion_tokens if response.usage else 0}")
                 logger.error(f"[BOTHUB] Full response: {response}")
-                # Возвращаем "не спам" с низкой уверенностью при пустом ответе
                 return False, 0.0, {
                     "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                     "completion_tokens": response.usage.completion_tokens if response.usage else 0,
@@ -186,10 +184,8 @@ User context:
                 }
 
             try:
-                # Очищаем content от возможного мусора (пробелы, переносы строк)
                 clean_content = content.strip()
 
-                # Если есть дополнительный текст до/после JSON, пытаемся извлечь только JSON
                 import re
                 json_match = re.search(r'\{[^}]*"is_spam"[^}]*"confidence"[^}]*\}', clean_content)
                 if json_match:
@@ -199,7 +195,6 @@ User context:
                 result = json.loads(clean_content)
                 logger.info(f"[BOTHUB] Parsed JSON: {result}")
 
-                # Проверяем что JSON содержит обязательные поля
                 if "is_spam" not in result or "confidence" not in result:
                     raise ValueError(f"Missing required fields in response: {result}")
 
@@ -207,7 +202,6 @@ User context:
                 logger.error(f"[BOTHUB] JSON decode/validation error: {e}")
                 logger.error(f"[BOTHUB] Full response content (len={len(content)}): {content}")
                 logger.error(f"[BOTHUB] Usage: {response.usage}")
-                # Fallback - возвращаем безопасные значения
                 return False, 0.0, {
                     "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                     "completion_tokens": response.usage.completion_tokens if response.usage else 0,
@@ -217,16 +211,13 @@ User context:
             is_spam = result.get("is_spam", False)
             raw_confidence = float(result.get("confidence", 0.0))
 
-            # Конвертируем BotHub confidence в RUSpam-совместимый формат:
-            # BotHub: is_spam=true, confidence=0.95 → RUSpam: 0.95 (спам)
-            # BotHub: is_spam=false, confidence=0.95 → RUSpam: 0.05 (не спам)
             confidence = raw_confidence if is_spam else (1.0 - raw_confidence)
 
             token_usage = {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
-                "raw_confidence": raw_confidence  # Сохраняем исходную уверенность для логирования
+                "raw_confidence": raw_confidence
             }
 
             processing_time = time.time() - start_time

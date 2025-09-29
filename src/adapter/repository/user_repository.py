@@ -239,7 +239,6 @@ class UserRepository:
         """Разбанить пользователя"""
         ban_query = "DELETE FROM banned_users WHERE telegram_id = $1 AND chat_id = $2"
 
-        # Обновляем статистику только если пользователь существует
         spam_reset_query = """
         UPDATE users
         SET daily_spam_count = 0, last_spam_reset_date = NOW()
@@ -247,10 +246,8 @@ class UserRepository:
         """
 
         async with self.db.acquire() as conn:
-            # Удаляем бан (может не существовать - это нормально)
             await conn.execute(ban_query, user_id, chat_id)
 
-            # Проверяем существование пользователя перед UPDATE
             user_exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM users WHERE telegram_id = $1)", user_id)
             if user_exists:
                 await conn.execute(spam_reset_query, user_id)

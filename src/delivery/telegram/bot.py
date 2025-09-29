@@ -40,7 +40,7 @@ class AntiSpamBot:
             admin_users = config.telegram.admin_users
 
         self.dp.message.middleware(DependencyMiddleware())
-        self.dp.message.middleware(FloodControlMiddleware(max_messages=5, time_window=5, mute_duration=30))
+        self.dp.message.middleware(FloodControlMiddleware(max_messages=3, time_window=3, mute_duration=30))
         self.dp.message.middleware(ThrottlingMiddleware())
         self.dp.message.middleware(AuthMiddleware(admin_user_ids=admin_users))
 

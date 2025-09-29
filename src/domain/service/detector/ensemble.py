@@ -224,7 +224,7 @@ class EnsembleDetector:
         is_spam_detected = False
         primary_reason: Optional[DetectionReason] = None
         max_confidence = 0.0
-        overall_confidence = 0.0  # Общая уверенность для логирования
+        overall_confidence = 0.0
 
         text = message.text or ""
         detected_language = self._detect_language(text)
