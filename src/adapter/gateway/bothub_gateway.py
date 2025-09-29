@@ -147,53 +147,33 @@ User context:
 - Is new user: {user_context.get('is_new_user', False)}
 """
 
-            # Используем системный промпт для всех моделей (уже содержит формат ответа)
-            system_content = self.system_prompt
-
             messages = [
-                {"role": "system", "content": system_content},
+                {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": f"{context_info}\n\nMessage to analyze: {text}"},
             ]
 
-            # Базовые параметры для OpenAI клиента
             request_params = {
                 "model": self.model,
                 "messages": messages,
-                "max_tokens": min(self.max_tokens, 200),  # Ограничиваем для краткости
+                "max_tokens": self.max_tokens,
                 "temperature": self.temperature
             }
 
-            # Оптимизация для разных типов моделей
-            extra_params = {}
+            if self.model.lower().startswith('gpt') or 'gpt' in self.model.lower():
+                request_params["reasoning"] = {"max_tokens": 0}
+                logger.debug(f"[BOTHUB] Полностью отключаем reasoning для GPT модели: {self.model}")
 
-            # Простой JSON mode для всех моделей
-            request_params["response_format"] = {"type": "json_object"}
-            logger.debug(f"[BOTHUB] Используем JSON mode для модели {self.model}")
+            if "max_tokens" in request_params:
+                request_params["max_tokens"] = min(request_params["max_tokens"], 200)
 
-            # Выполняем запрос (без extra_params)
             response = await self.client.chat.completions.create(**request_params)
 
-            # Определяем откуда читать ответ в зависимости от модели
-            content = getattr(response.choices[0].message, 'content', '') or ""
-            reasoning = getattr(response.choices[0].message, 'reasoning', '') or ""
+            content = response.choices[0].message.content
+            logger.info(f"[BOTHUB] Raw API response: {repr(content)}")
 
-            if 'gpt-5' in self.model.lower():
-                # GPT-5: ВСЕГДА читаем из reasoning (content всегда пустой)
-                response_text = reasoning  # reasoning никогда не пустой для GPT-5
-                source_field = "reasoning"
-                logger.info(f"[BOTHUB] GPT-5 reasoning (len={len(response_text)}): {repr(response_text[:100])}")
-            else:
-                # Все остальные модели: читаем из content
-                response_text = content
-                source_field = "content"
-                logger.info(f"[BOTHUB] {self.model} content (len={len(response_text)}): {repr(response_text[:100])}")
-
-            # Логируем оба поля для диагностики
-            logger.debug(f"[BOTHUB] Content: {len(content)} chars, Reasoning: {len(reasoning)} chars")
-
-            if not response_text or response_text.strip() == "":
-                logger.error(f"[BOTHUB] Empty response from {source_field}")
-                logger.error(f"[BOTHUB] Content: {repr(content[:100])}, Reasoning: {repr(reasoning[:100])}")
+            if not content or content.strip() == "":
+                logger.error(f"[BOTHUB] Empty response despite completion_tokens={response.usage.completion_tokens if response.usage else 0}")
+                logger.error(f"[BOTHUB] Full response: {response}")
                 return False, 0.0, {
                     "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                     "completion_tokens": response.usage.completion_tokens if response.usage else 0,
@@ -201,59 +181,23 @@ User context:
                 }
 
             try:
-                clean_text = response_text.strip()
-                result = None
+                clean_content = content.strip()
 
-                # Для GPT-5: пробуем парсить JSON из reasoning текста
-                if 'gpt-5' in self.model.lower() and source_field == "reasoning":
-                    import re
-                    # Ищем JSON объект в reasoning тексте
-                    json_patterns = [
-                        r'\{[^}]*"is_spam"[^}]*"confidence"[^}]*\}',  # Простой поиск
-                        r'\{.*?"is_spam".*?"confidence".*?\}',        # Гибкий поиск
-                        r'(\{[^{}]*"is_spam"[^{}]*"confidence"[^{}]*\})', # Без вложенности
-                    ]
+                import re
+                json_match = re.search(r'\{[^}]*"is_spam"[^}]*"confidence"[^}]*\}', clean_content)
+                if json_match:
+                    clean_content = json_match.group(0)
+                    logger.debug(f"[BOTHUB] Извлечен чистый JSON: {clean_content}")
 
-                    for pattern in json_patterns:
-                        matches = re.findall(pattern, clean_text, re.DOTALL)
-                        for match in matches:
-                            try:
-                                result = json.loads(match)
-                                logger.debug(f"[BOTHUB] Extracted JSON from reasoning: {match}")
-                                break
-                            except json.JSONDecodeError:
-                                continue
-                        if result:
-                            break
-
-                    if not result:
-                        # Последняя попытка - ищем любой JSON с нужными полями
-                        json_objects = re.findall(r'\{[^}]*\}', clean_text)
-                        for obj_str in json_objects:
-                            try:
-                                obj = json.loads(obj_str)
-                                if "is_spam" in obj and "confidence" in obj:
-                                    result = obj
-                                    logger.debug(f"[BOTHUB] Found valid JSON object: {obj_str}")
-                                    break
-                            except json.JSONDecodeError:
-                                continue
-                else:
-                    # Для других моделей: прямой парсинг JSON
-                    result = json.loads(clean_text)
-
-                if not result:
-                    raise ValueError(f"No valid JSON found in {source_field}")
-
-                logger.info(f"[BOTHUB] Parsed JSON from {source_field}: {result}")
+                result = json.loads(clean_content)
+                logger.info(f"[BOTHUB] Parsed JSON: {result}")
 
                 if "is_spam" not in result or "confidence" not in result:
                     raise ValueError(f"Missing required fields in response: {result}")
 
             except (json.JSONDecodeError, ValueError) as e:
-                logger.error(f"[BOTHUB] JSON decode/validation error from {source_field}: {e}")
-                logger.error(f"[BOTHUB] Full {source_field} response (len={len(response_text)}): {response_text}")
-                logger.error(f"[BOTHUB] Content: {repr(content[:100])}, Reasoning: {repr(reasoning[:100])}")
+                logger.error(f"[BOTHUB] JSON decode/validation error: {e}")
+                logger.error(f"[BOTHUB] Full response content (len={len(content)}): {content}")
                 logger.error(f"[BOTHUB] Usage: {response.usage}")
                 return False, 0.0, {
                     "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
